@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rental OS — Operations</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+  :root{
+    --ink:#0c1f2c; --deep:#0a3047; --teal:#0f6a7d; --aqua:#21a7b8;
+    --sand:#f4efe6; --paper:#fbf8f2; --line:#dfd6c6; --good:#1f7a53;
+    --warn:#b8541f; --bad:#a32626; --mut:#6b7d86;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'IBM Plex Sans',sans-serif;background:var(--paper);color:var(--ink);
+    background-image:radial-gradient(circle at 1px 1px, rgba(12,31,44,.05) 1px, transparent 0);
+    background-size:22px 22px;min-height:100vh}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  /* Login */
+  #login{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    background:linear-gradient(150deg,var(--deep),var(--ink));z-index:50}
+  #login .card{background:var(--paper);padding:42px;width:360px;border-radius:4px;
+    box-shadow:0 30px 80px rgba(0,0,0,.4)}
+  #login h1{font-family:'Fraunces',serif;font-size:30px;font-weight:700;margin-bottom:4px}
+  #login p{color:var(--mut);font-size:13px;margin-bottom:26px}
+  input,select{width:100%;padding:11px 13px;border:1px solid var(--line);background:#fff;
+    border-radius:3px;font-family:inherit;font-size:14px;margin-bottom:12px}
+  input:focus,select:focus{outline:none;border-color:var(--teal)}
+  button{cursor:pointer;border:none;font-family:inherit;font-weight:600}
+  .btn{background:var(--deep);color:var(--sand);padding:11px 18px;border-radius:3px;font-size:14px;
+    transition:.15s}
+  .btn:hover{background:var(--teal)}
+  .btn-sm{padding:6px 12px;font-size:12px}
+  .btn-ghost{background:transparent;color:var(--teal);border:1px solid var(--line)}
+  /* Layout */
+  .shell{display:none;grid-template-columns:228px 1fr;min-height:100vh}
+  aside{background:var(--ink);color:var(--sand);padding:26px 18px;position:sticky;top:0;height:100vh}
+  .brand{font-family:'Fraunces',serif;font-size:22px;font-weight:700;line-height:1.1;margin-bottom:2px}
+  .brand small{display:block;font-family:'IBM Plex Mono';font-size:10px;letter-spacing:2px;
+    color:var(--aqua);margin-top:6px;text-transform:uppercase}
+  nav{margin-top:30px;display:flex;flex-direction:column;gap:2px}
+  nav a{color:#b7c4cb;text-decoration:none;padding:10px 13px;border-radius:3px;font-size:14px;
+    display:flex;align-items:center;gap:10px;transition:.12s;cursor:pointer}
+  nav a:hover{background:rgba(255,255,255,.06);color:#fff}
+  nav a.active{background:var(--teal);color:#fff}
+  nav a .dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.5}
+  main{padding:32px 38px;overflow:auto;max-height:100vh}
+  header.top{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:26px}
+  header.top h2{font-family:'Fraunces',serif;font-size:30px;font-weight:600}
+  header.top .sub{color:var(--mut);font-size:13px;margin-top:3px}
+  .logout{font-size:12px;color:var(--mut);cursor:pointer}
+  /* Cards */
+  .grid{display:grid;gap:16px}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  .stat{background:#fff;border:1px solid var(--line);border-radius:4px;padding:20px 22px;
+    position:relative;overflow:hidden}
+  .stat::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--aqua)}
+  .stat .k{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--mut)}
+  .stat .v{font-family:'Fraunces',serif;font-size:34px;font-weight:600;margin-top:6px}
+  .stat .v small{font-size:15px;color:var(--mut)}
+  .panel{background:#fff;border:1px solid var(--line);border-radius:4px;padding:22px}
+  .panel h3{font-family:'Fraunces',serif;font-size:18px;margin-bottom:14px;font-weight:600}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--mut);
+    padding:8px 10px;border-bottom:2px solid var(--line)}
+  td{padding:10px;border-bottom:1px solid #efe9dd}
+  tr:hover td{background:var(--sand)}
+  .tag{font-family:'IBM Plex Mono';font-size:11px;padding:3px 9px;border-radius:20px;font-weight:500}
+  .t-pending{background:#fff3e0;color:var(--warn)}
+  .t-confirmed{background:#e3f3ec;color:var(--good)}
+  .t-cancelled{background:#fbe6e6;color:var(--bad)}
+  .t-completed{background:#e6eef3;color:var(--deep)}
+  .pill{display:inline-block;font-family:'IBM Plex Mono';font-size:10px;letter-spacing:1px;
+    padding:2px 8px;border:1px solid var(--line);border-radius:20px;color:var(--mut);text-transform:uppercase}
+  .row-actions{display:flex;gap:6px}
+  .toolbar{display:flex;gap:10px;margin-bottom:18px;align-items:center;flex-wrap:wrap}
+  .toolbar input,.toolbar select{width:auto;margin:0;min-width:120px}
+  .empty{color:var(--mut);font-size:13px;padding:24px;text-align:center}
+  .badge-live{font-size:11px;color:var(--good)}
+  .badge-off{font-size:11px;color:var(--mut)}
+  .modal-bg{position:fixed;inset:0;background:rgba(10,20,28,.55);display:none;
+    align-items:center;justify-content:center;z-index:40}
+  .modal{background:var(--paper);padding:30px;border-radius:5px;width:460px;max-height:88vh;overflow:auto}
+  .modal h3{font-family:'Fraunces',serif;font-size:21px;margin-bottom:16px}
+  .modal label{font-size:12px;color:var(--mut);display:block;margin-bottom:3px;margin-top:8px}
+  .err{color:var(--bad);font-size:13px;margin-top:8px;min-height:18px}
+  .convo{max-height:380px;overflow:auto;display:flex;flex-direction:column;gap:8px}
+  .msg{padding:9px 13px;border-radius:9px;font-size:13px;max-width:78%}
+  .msg.inbound{background:var(--sand);align-self:flex-start}
+  .msg.outbound{background:var(--deep);color:var(--sand);align-self:flex-end}
+  .msg .meta{font-size:9px;opacity:.6;margin-top:3px;text-transform:uppercase;letter-spacing:1px}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div class="card">
+    <h1>Rental OS</h1>
+    <p>Operations console · sign in</p>
+    <input id="lu" placeholder="username" value="admin" autocomplete="username">
+    <input id="lp" type="password" placeholder="password" value="admin123" autocomplete="current-password">
+    <button class="btn" style="width:100%" onclick="login()">Sign in</button>
+    <div class="err" id="lerr"></div>
+  </div>
+</div>
+
+<div class="shell" id="shell">
+  <aside>
+    <div class="brand">Rental OS<small>Source of Truth</small></div>
+    <nav id="nav"></nav>
+  </aside>
+  <main>
+    <header class="top">
+      <div><h2 id="ptitle">Dashboard</h2><div class="sub" id="psub"></div></div>
+      <div class="logout" onclick="logout()">↪ Sign out</div>
+    </header>
+    <div id="view"></div>
+  </main>
+</div>
+
+<div class="modal-bg" id="modalbg"><div class="modal" id="modal"></div></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
