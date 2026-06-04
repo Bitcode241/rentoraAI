@@ -184,12 +184,14 @@ const RENDER = {
 function bookingTable(b, full){
   if(!b||!b.length) return '<div class="empty">No reservations</div>';
   return `<table><thead><tr><th>#</th><th>Asset</th><th>Package</th><th>Start</th><th>End</th>
-    <th>Total</th><th>Status</th><th>Src</th>${full?'<th></th>':''}</tr></thead><tbody>
+    <th>Total</th><th>Status</th><th>Plaćanje</th><th>Src</th>${full?'<th></th>':''}</tr></thead><tbody>
     ${b.map(x=>`<tr><td class="mono">${x.id}</td><td>#${x.asset_id}</td>
     <td>${x.package_name||'—'}</td><td>${fmt(x.start_datetime)}</td>
     <td>${fmt(x.end_datetime)}</td><td>${money(x.total_price)}</td><td>${statusTag(x.status)}</td>
+    <td>${payTag(x.payment_status)}</td>
     <td><span class="pill">${x.source}</span></td>
     ${full?`<td class="row-actions">${x.status==='pending'?`<button class="btn btn-sm" onclick="confirmB(${x.id})">Confirm</button>`:''}
+    ${(x.payment_status!=='deposit_paid')?`<button class="btn btn-sm" onclick="chargeDeposit(${x.id})">Naplati depozit</button>`:''}
     ${x.status!=='cancelled'&&x.status!=='completed'?`<button class="btn btn-sm btn-ghost" onclick="cancelB(${x.id})">Cancel</button>`:''}</td>`:''}</tr>`).join('')}
     </tbody></table>`;
 }
@@ -510,6 +512,25 @@ async function testMailbox(id){
   catch(e){ alert('Error: '+e.message); }
 }
 
+
+
+function payTag(ps){
+  const map={unpaid:['Neplaćeno','#999'],awaiting_payment:['Čeka uplatu','var(--warn)'],
+    deposit_paid:['Depozit plaćen','var(--good)'],refunded:['Vraćeno','var(--deep)']};
+  const [label,color]=map[ps||'unpaid']||map.unpaid;
+  return `<span style="font-size:11px;color:${color};font-weight:600">${label}</span>`;
+}
+async function chargeDeposit(id){
+  try{
+    const r=await api('/api/payments/checkout/'+id,{method:'POST'});
+    if(r.url){
+      // otvori Stripe stranicu za plaćanje u novom tabu
+      window.open(r.url,'_blank');
+    } else {
+      alert('Greška: '+(r.message||r.error||'nepoznato'));
+    }
+  }catch(e){ alert(e.message); }
+}
 
 // auto-login if token cached
 const cached = sessionStorage.getItem('tok');
