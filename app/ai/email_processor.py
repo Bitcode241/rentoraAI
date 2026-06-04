@@ -88,6 +88,90 @@ def _extract_email(addr: str) -> str:
     return m.group(0) if m else ""
 
 
+def _maybe_handle_owner_reply(db, sender_email, em, mailbox, manager):
+    """If sender is an external owner with a pending request, process DA/NE.
+    Returns a result dict if handled, else None."""
+    from app.services import external_service, booking_service
+    from app.models.external_request import ExternalRequest
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+
+    # token in subject/body like (referenca: A1B2C3)
+    text = (em.get("subject", "") + " " + em.get("body", ""))
+    m = re.search(r"\b([0-9A-F]{6})\b", text.upper())
+    token = m.group(1) if m else ""
+
+    req = external_service.find_open_request_for_owner(db, sender_email, token)
+    if not req:
+        return None  # not an owner reply — let normal flow handle it
+
+    answer = external_service.parse_owner_reply(em.get("body", ""))
+    if answer is None:
+        # owner wrote something unclear — leave for human, don't guess
+        log.info("external_owner_reply_unclear", req_id=req.id, sender=sender_email)
+        return {"external_request": req.id, "owner_reply": "unclear",
+                "needs_human": True, "auto_sent": False}
+
+    asset = db.get(Asset, req.asset_id)
+    guest = db.get(Customer, req.customer_id)
+
+    if answer == "no":
+        req.status = "declined"
+        db.commit()
+        # tell the guest it's not available
+        if manager and guest and guest.email:
+            manager.reply_from(req.guest_mailbox or mailbox, guest.email,
+                               "Re: Upit za plovilo",
+                               "Pozdrav,\n\nNažalost, plovilo nije slobodno za traženi "
+                               "termin. Rado ću predložiti alternativu ako želite — "
+                               "javite mi datum ili broj osoba pa provjerim druge opcije.\n\nLijep pozdrav")
+        log.info("external_declined", req_id=req.id)
+        return {"external_request": req.id, "owner_reply": "no",
+                "needs_human": False, "auto_sent": True}
+
+    # answer == "yes": create the booking, notify guest + business owner
+    try:
+        booking = booking_service.create_booking(
+            db, asset_id=req.asset_id, customer_id=req.customer_id,
+            package_id=req.package_id or None,
+            start=req.start_datetime, end=req.end_datetime,
+            source="external")
+    except Exception as e:  # availability clash etc.
+        log.warning("external_booking_failed", req_id=req.id, error=str(e))
+        req.status = "confirmed"
+        db.commit()
+        return {"external_request": req.id, "owner_reply": "yes",
+                "booking_error": str(e), "needs_human": True, "auto_sent": False}
+
+    req.status = "confirmed"
+    db.commit()
+
+    split = external_service.commission_split(req.quoted_price,
+                                              asset.commission_percent)
+    # notify guest (from the mailbox they used)
+    if manager and guest and guest.email:
+        when = req.start_datetime.strftime("%d.%m.%Y %H:%M")
+        manager.reply_from(req.guest_mailbox or mailbox, guest.email,
+                           "Re: Potvrda rezervacije",
+                           f"Pozdrav,\n\nVaš termin je potvrđen!\n\n"
+                           f"Plovilo: {asset.name}\nTermin: {when}\n"
+                           f"Cijena: {split['guest_pays']} EUR\n\n"
+                           f"Uskoro šaljem detalje za dovršetak rezervacije.\n\nLijep pozdrav")
+    # notify the business owner (you) — to the mailbox that received it
+    if manager:
+        manager.reply_from(mailbox, mailbox,
+                           f"[INTERNO] Vanjski brod potvrđen: {asset.name}",
+                           f"Vlasnik je potvrdio {asset.name}.\n"
+                           f"Gost: {req.guest_email}\n"
+                           f"Cijena gostu: {split['guest_pays']} EUR\n"
+                           f"Tvoja provizija: {split['your_commission']} EUR\n"
+                           f"Vlasniku ide: {split['owner_gets']} EUR\n"
+                           f"Booking #{booking.id}")
+    log.info("external_confirmed", req_id=req.id, booking_id=booking.id)
+    return {"external_request": req.id, "owner_reply": "yes",
+            "booking_id": booking.id, "needs_human": False, "auto_sent": True}
+
+
 def process_unread(db: Session, max_results: int = 10) -> list:
     from app.integrations.email_imap import MultiMailboxManager
     mailbox_manager = MultiMailboxManager.from_db(db)
@@ -102,6 +186,18 @@ def process_unread(db: Session, max_results: int = 10) -> list:
     for em in inbox:
         sender_email = em.get("from_email") or _extract_email(em.get("from", ""))
         mailbox = em.get("mailbox", "")   # which of our addresses received it
+
+        # --- EXTERNAL OWNER REPLY? (check before the rental filter) ---
+        # If this sender is the owner of an external asset AND has a pending
+        # request, treat their DA/NE as an availability answer, not a guest mail.
+        handled = _maybe_handle_owner_reply(db, sender_email, em, mailbox,
+                                            mailbox_manager if use_manager else None)
+        if handled is not None:
+            if use_manager:
+                mailbox_manager.mark_read(mailbox, em.get("id", ""))
+            processed.append(handled)
+            continue
+
         customer = conversation_service.find_or_create_customer(
             db, email=sender_email, full_name=sender_email)
 

@@ -28,6 +28,9 @@ def _serialize_assets(results, dedupe=False):
             "location": a.location,
             "packages": pricing.list_packages(a),
             "quote": r.get("quote"),
+            # internal flag: external boats need owner confirmation before booking.
+            # The AI uses this to route, but must NOT reveal it to the guest.
+            "is_external": bool(getattr(a, "is_external", False)),
         })
     if not dedupe:
         return out
@@ -93,12 +96,51 @@ def get_prices(db: Session, asset_id: int, start: str = "", end: str = ""):
 
 def create_booking(db: Session, asset_id: int, customer_id: int, start: str, end: str,
                    package_id: int = None):
+    # External boats must NOT be booked directly — they need owner confirmation.
+    from app.models.asset import Asset
+    asset = db.get(Asset, asset_id)
+    if asset and getattr(asset, "is_external", False):
+        return {"error": "external_asset",
+                "message": "This boat needs owner confirmation first. "
+                           "Call request_external_availability instead of booking."}
     b = booking_service.create_booking(db, asset_id, customer_id,
                                         _parse(start), _parse(end),
                                         source="ai", actor="ai-agent",
                                         package_id=package_id)
     return {"booking_id": b.id, "status": b.status, "package": b.package_name,
             "total_price": b.total_price, "deposit": b.deposit_amount}
+
+
+def request_external_availability(db: Session, asset_id: int, customer_id: int,
+                                  start: str, end: str, passengers: int,
+                                  price: float, package_id: int = None,
+                                  guest_mailbox: str = ""):
+    """For an EXTERNAL (partner) boat: ask the owner if it's free. Does NOT book.
+    The owner is emailed; when they reply DA, the booking is created automatically.
+    Tell the guest you're checking availability and will get back to them."""
+    from app.services import external_service
+    from app.integrations.email_imap import MultiMailboxManager
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    asset = db.get(Asset, asset_id)
+    customer = db.get(Customer, customer_id)
+    if not asset or not asset.is_external:
+        return {"error": "not_external", "message": "Asset is not an external boat."}
+    req = external_service.create_request(
+        db, asset, customer, start=_parse(start), end=_parse(end),
+        passengers=passengers, price=price, guest_mailbox=guest_mailbox)
+    req.package_id = package_id or 0
+    db.commit()
+    # email the owner now
+    mgr = MultiMailboxManager.from_db(db)
+    if mgr.enabled and asset.owner_email:
+        body = external_service.owner_email_body(req, asset)
+        from_box = guest_mailbox or next(iter(mgr.services.keys()), "")
+        mgr.reply_from(from_box, asset.owner_email,
+                       f"Upit za plovilo {asset.name} (ref: {req.token})", body)
+    return {"status": "owner_asked", "request_id": req.id,
+            "message": "Owner has been asked. Tell the guest you're checking "
+                       "availability and will confirm shortly."}
 
 
 def cancel_booking(db: Session, booking_id: int):
@@ -187,6 +229,21 @@ TOOL_SCHEMAS = [
             "package_id": {"type": "integer", "description": "Chosen price package id"}},
             "required": ["asset_id", "customer_id", "start", "end"]}}},
     {"type": "function", "function": {
+        "name": "request_external_availability",
+        "description": "For an EXTERNAL/partner boat (is_external=true in availability "
+                       "results): ask the owner if it's free instead of booking. "
+                       "Does NOT create a booking. After calling, tell the guest you're "
+                       "checking availability and will confirm shortly. Never reveal to "
+                       "the guest that the boat belongs to someone else.",
+        "parameters": {"type": "object", "properties": {
+            "asset_id": {"type": "integer"}, "customer_id": {"type": "integer"},
+            "start": {"type": "string"}, "end": {"type": "string"},
+            "passengers": {"type": "integer"},
+            "price": {"type": "number", "description": "Quoted package price"},
+            "package_id": {"type": "integer"},
+            "guest_mailbox": {"type": "string", "description": "Address the guest wrote to"}},
+            "required": ["asset_id", "customer_id", "start", "end", "passengers", "price"]}}},
+    {"type": "function", "function": {
         "name": "cancel_booking",
         "description": "Cancel a booking by id.",
         "parameters": {"type": "object", "properties": {"booking_id": {"type": "integer"}},
@@ -231,6 +288,7 @@ TOOL_FUNCS = {
     "check_availability": check_availability,
     "get_prices": get_prices,
     "create_booking": create_booking,
+    "request_external_availability": request_external_availability,
     "cancel_booking": cancel_booking,
     "get_customer_history": get_customer_history,
     "list_transfer_zones": list_transfer_zones,

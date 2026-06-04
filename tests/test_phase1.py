@@ -146,3 +146,44 @@ def test_external_asset(client, auth):
     assert a["is_external"] is True
     assert a["owner_email"] == "marko@example.com"
     assert a["commission_percent"] == 15
+
+
+def test_external_flow_owner_confirms(client, auth):
+    """Full external flow: create external boat -> request -> owner DA -> booking."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.models.booking import Booking
+    from app.services import external_service
+    from app.ai.email_processor import _maybe_handle_owner_reply
+    from datetime import datetime, timezone, timedelta
+
+    db = SessionLocal()
+    ext = Asset(name="Partner X", asset_type="boat", capacity=8, is_external=True,
+                owner_name="Marko", owner_email="owner@partner.com",
+                commission_percent=15, deposit_percent=30)
+    db.add(ext); db.commit(); db.refresh(ext)
+    guest = Customer(full_name="Guest", email="guest@x.com")
+    db.add(guest); db.commit(); db.refresh(guest)
+    start = datetime.now(timezone.utc) + timedelta(days=20)
+    end = start + timedelta(hours=4)
+    req = external_service.create_request(db, ext, guest, start=start, end=end,
+                                          passengers=6, price=450)
+    assert req.status == "pending"
+    assert len(req.token) == 6
+
+    em = {"from_email": "owner@partner.com",
+          "subject": f"Re (ref: {req.token})", "body": "DA", "id": "1"}
+    res = _maybe_handle_owner_reply(db, "owner@partner.com", em, "info@x.com", None)
+    assert res["owner_reply"] == "yes"
+    db.refresh(req)
+    assert req.status == "confirmed"
+    assert db.query(Booking).filter(Booking.asset_id == ext.id).count() == 1
+    db.close()
+
+
+def test_commission_split():
+    from app.services.external_service import commission_split
+    s = commission_split(450, 15)
+    assert s["your_commission"] == 67.5
+    assert s["owner_gets"] == 382.5
