@@ -21,3 +21,4 @@ python-dateutil==2.9.0
 pytest==8.2.0
 pytest-asyncio==0.23.7
 apscheduler==3.10.4
+stripe>=8.0.0

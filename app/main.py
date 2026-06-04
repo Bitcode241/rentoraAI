@@ -13,7 +13,7 @@ from app.core.logging import configure_logging, get_logger
 from app.core.database import Base, engine, SessionLocal
 from app.api.routes import (auth, assets, customers, bookings, availability,
                             messages, emails, reports, webhooks, dashboard, packages,
-                            transfers, calendar, mailboxes)
+                            transfers, calendar, mailboxes, payments)
 
 configure_logging(settings.debug)
 log = get_logger("main")
@@ -50,7 +50,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 for r in (auth, assets, customers, bookings, availability, messages,
-          emails, reports, webhooks, dashboard, packages, transfers, calendar, mailboxes):
+          emails, reports, webhooks, dashboard, packages, transfers, calendar, mailboxes, payments):
     app.include_router(r.router)
 
 
@@ -62,6 +62,30 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "healthy"}
+
+
+def _pay_page(title: str, msg: str):
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(f"""<!doctype html><html lang="hr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title>
+<style>body{{font-family:system-ui,sans-serif;background:#0f6a7d;color:#fff;display:flex;
+min-height:100vh;align-items:center;justify-content:center;margin:0}}.card{{background:#fff;
+color:#0d2b32;padding:40px;border-radius:14px;max-width:420px;text-align:center;
+box-shadow:0 10px 40px rgba(0,0,0,.2)}}h1{{margin:0 0 12px;font-size:22px}}
+p{{color:#5a6b6f;line-height:1.5}}</style></head><body><div class="card">
+<h1>{title}</h1><p>{msg}</p></div></body></html>""")
+
+
+@app.get("/pay/success")
+def pay_success():
+    return _pay_page("Hvala! Depozit je zaprimljen.",
+                     "Vaša rezervacija je potvrđena. Vidimo se uskoro!")
+
+
+@app.get("/pay/cancel")
+def pay_cancel():
+    return _pay_page("Plaćanje otkazano",
+                     "Rezervacija nije potvrđena. Možete pokušati ponovno ili nas kontaktirati.")
 
 
 @app.exception_handler(Exception)

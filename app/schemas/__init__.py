@@ -163,6 +163,8 @@ class BookingOut(BaseModel):
     source: str
     notes: str
     calendar_event_id: str
+    payment_status: str = "unpaid"
+    amount_paid: float = 0.0
     created_at: datetime
 
 

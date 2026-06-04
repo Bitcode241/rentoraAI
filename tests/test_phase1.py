@@ -187,3 +187,39 @@ def test_commission_split():
     s = commission_split(450, 15)
     assert s["your_commission"] == 67.5
     assert s["owner_gets"] == 382.5
+
+
+def test_payment_config_endpoint(client, auth):
+    r = client.get("/api/payments/config", headers=auth)
+    assert r.status_code == 200
+    body = r.json()
+    assert "enabled" in body and "currency" in body
+    # not configured in tests -> enabled False, no crash
+    assert body["enabled"] in (True, False)
+
+
+def test_pay_success_page(client):
+    r = client.get("/pay/success")
+    assert r.status_code == 200
+    assert "depozit" in r.text.lower() or "hvala" in r.text.lower()
+
+
+def test_checkout_requires_stripe(client, auth):
+    # create a booking, then try checkout — without stripe keys it returns a clean error
+    from app.core.database import SessionLocal
+    from app.models.booking import Booking
+    from app.models.customer import Customer
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    c = Customer(full_name="Pay Test", email="pay@x.com")
+    db.add(c); db.commit(); db.refresh(c)
+    s = datetime.now(timezone.utc) + timedelta(days=8)
+    b = Booking(asset_id=1, customer_id=c.id, start_datetime=s,
+                end_datetime=s + timedelta(hours=4), total_price=450,
+                deposit_amount=135, status="pending")
+    db.add(b); db.commit(); bid = b.id
+    db.close()
+    r = client.post(f"/api/payments/checkout/{bid}", headers=auth)
+    assert r.status_code == 200
+    # stripe not configured in tests -> clean error, not a crash
+    assert r.json().get("error") == "stripe_not_configured"

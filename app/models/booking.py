@@ -19,6 +19,12 @@ class Booking(Base):
     source: Mapped[str] = mapped_column(String(16), default="admin")
     notes: Mapped[str] = mapped_column(Text, default="")
     calendar_event_id: Mapped[str] = mapped_column(String(255), default="")
+    # ---- Payment (Stripe deposit) ----
+    # payment_status: unpaid | awaiting_payment | deposit_paid | refunded
+    payment_status: Mapped[str] = mapped_column(String(20), default="unpaid", index=True)
+    amount_paid: Mapped[float] = mapped_column(Float, default=0.0)
+    stripe_session_id: Mapped[str] = mapped_column(String(255), default="")
+    stripe_payment_intent: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     asset = relationship("Asset")

@@ -86,6 +86,19 @@ class Settings(BaseSettings):
     default_language: str = "en"
     rate_limit: str = "100/minute"
 
+    # ---- Stripe (online deposit payments) ----
+    # Secret key lives here (system secret, like JWT). Publishable key is safe
+    # to expose to the browser. currency is ISO (eur). deposit_percent default
+    # mirrors the business rule (30%).
+    stripe_secret_key: str = ""
+    stripe_publishable_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_currency: str = "eur"
+    public_base_url: str = "https://app.rentoraai.com"  # for success/cancel redirects
+
+    def stripe_enabled(self) -> bool:
+        return bool(self.stripe_secret_key)
+
 
 @lru_cache
 def get_settings() -> Settings:
