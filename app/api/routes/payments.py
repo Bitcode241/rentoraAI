@@ -45,13 +45,25 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
-        booking_id = (session.get("metadata") or {}).get("booking_id")
+        # Stripe objects aren't plain dicts; access fields defensively.
+        try:
+            metadata = dict(session.get("metadata") or {}) if hasattr(session, "get") else {}
+        except Exception:
+            metadata = {}
+        if not metadata:
+            # fallback: Stripe object attribute access
+            metadata = dict(getattr(session, "metadata", {}) or {})
+        booking_id = metadata.get("booking_id")
+        amount_total = (session.get("amount_total") if hasattr(session, "get")
+                        else getattr(session, "amount_total", 0)) or 0
+        payment_intent = (session.get("payment_intent") if hasattr(session, "get")
+                          else getattr(session, "payment_intent", "")) or ""
         if booking_id:
             b = db.get(Booking, int(booking_id))
             if b:
                 b.payment_status = "deposit_paid"
-                b.amount_paid = (session.get("amount_total") or 0) / 100.0
-                b.stripe_payment_intent = session.get("payment_intent", "")
+                b.amount_paid = amount_total / 100.0
+                b.stripe_payment_intent = payment_intent
                 # Confirm the booking now that money has actually arrived.
                 if b.status in ("pending",):
                     b.status = "confirmed"
