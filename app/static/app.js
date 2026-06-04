@@ -1,7 +1,7 @@
 const API = '';
 let TOKEN = '';
-const PAGES = ['Dashboard','Assets','Transfers','Bookings','Customers','Email Inbox',
-  'Calendar Status','Revenue Overview','Upcoming Reservations',
+const PAGES = ['Dashboard','Calendar','Assets','Transfers','Bookings','Customers','Email Inbox',
+  'Revenue Overview','Upcoming Reservations',
   "Today's Reservations",'Recent Conversations'];
 const SUBS = {
   'Dashboard':'Live operational overview',
@@ -10,7 +10,7 @@ const SUBS = {
   'Bookings':'All reservations across channels',
   'Customers':'Customer profiles & history',
   'Email Inbox':'Mail threads & detected intent',
-  'Calendar Status':'Google Calendar sync state',
+  'Calendar':'Visual schedule — bookings per vessel',
   'Revenue Overview':'Earnings & deposits held',
   'Upcoming Reservations':'Forward booking pipeline',
   "Today's Reservations":'Departures & returns today',
@@ -135,15 +135,8 @@ const RENDER = {
       <td>${x.messages}</td></tr>`).join('')||'<tr><td colspan=3 class="empty">Inbox empty — connect Gmail credentials to ingest mail</td></tr>'}
       </tbody></table></div>`;
   },
-  'Calendar Status': async (v)=>{
-    const a = await api('/api/assets');
-    v.innerHTML = `<div class="panel"><h3>Google Calendar Mapping</h3>
-      <p style="color:var(--mut);font-size:13px;margin-bottom:14px">Each asset is gated by its own calendar.
-      Availability is verified against the DB and these calendars before any confirmation.</p>
-      <table><thead><tr><th>Asset</th><th>Calendar ID</th><th>Gate</th></tr></thead><tbody>
-      ${a.map(x=>`<tr><td>${x.name}</td><td class="mono" style="font-size:12px">${x.calendar_id||'(none — DB only)'}</td>
-      <td>${x.calendar_id?'<span class="badge-live">● linked</span>':'<span class="badge-off">○ db-only</span>'}</td></tr>`).join('')}
-      </tbody></table></div>`;
+  'Calendar': async (v)=>{
+    await renderCalendar(v, window._calStart);
   },
   'Revenue Overview': async (v)=>{
     const [rev,util] = await Promise.all([api('/api/reports/revenue'),api('/api/reports/utilization')]);
@@ -351,6 +344,102 @@ async function saveZone(id){
 }
 async function delZone(id){ if(!confirm('Delete this zone?'))return;
   await api('/api/transfers/zones/'+id,{method:'DELETE'}); go('Transfers'); }
+
+
+// ---- Visual calendar (vessels x days) ----
+async function renderCalendar(v, startISO){
+  const DAYS = 14;
+  let start = startISO ? new Date(startISO) : new Date();
+  start.setHours(0,0,0,0);
+  start.setDate(start.getDate() - start.getDay() + (start.getDay()===0?-6:1)); // Monday
+  window._calStart = start.toISOString();
+  const end = new Date(start); end.setDate(end.getDate()+DAYS);
+
+  let data;
+  try{ data = await api(`/api/calendar?start=${start.toISOString()}&end=${end.toISOString()}`); }
+  catch(e){ v.innerHTML = `<div class="panel"><div class="err">${e.message}</div></div>`; return; }
+
+  const days = [];
+  for(let i=0;i<DAYS;i++){ const d=new Date(start); d.setDate(d.getDate()+i); days.push(d); }
+  const dayLabel = d => d.toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'numeric'});
+  const isWeekend = d => d.getDay()===0||d.getDay()===6;
+
+  // group events by asset
+  const byAsset = {};
+  data.events.forEach(e=>{ (byAsset[e.asset_id]=byAsset[e.asset_id]||[]).push(e); });
+
+  const colW = 78, rowH = 44, labelW = 150;
+  const fmtRange = `${days[0].toLocaleDateString(undefined,{day:'numeric',month:'short'})} – ${days[DAYS-1].toLocaleDateString(undefined,{day:'numeric',month:'short'})}`;
+
+  let header = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+    <button class="btn btn-sm btn-ghost" onclick="calNav(-7)">‹ Prev</button>
+    <button class="btn btn-sm btn-ghost" onclick="calNav(0)">Today</button>
+    <button class="btn btn-sm btn-ghost" onclick="calNav(7)">Next ›</button>
+    <span style="font-family:'Fraunces',serif;font-size:18px;margin-left:8px">${fmtRange}</span></div>`;
+
+  // column headers
+  let colHead = `<div style="display:grid;grid-template-columns:${labelW}px repeat(${DAYS},${colW}px);position:sticky;top:0;z-index:2">
+    <div style="background:var(--ink);color:var(--sand);padding:8px;font-size:11px;text-transform:uppercase;letter-spacing:1px;border-radius:3px 0 0 0">Vessel</div>
+    ${days.map(d=>`<div style="background:${isWeekend(d)?'var(--deep)':'var(--ink)'};color:var(--sand);padding:8px 4px;text-align:center;font-size:11px;border-left:1px solid rgba(255,255,255,.1)">${dayLabel(d)}</div>`).join('')}</div>`;
+
+  // rows
+  let rows = data.assets.map((a,ri)=>{
+    const evs = byAsset[a.id]||[];
+    let bars = evs.map(e=>{
+      const s = new Date(e.start), en = new Date(e.end);
+      let offDays = (s - start)/(1000*60*60*24);
+      let durDays = Math.max((en - s)/(1000*60*60*24), 0.25);
+      if(offDays<0){ durDays += offDays; offDays=0; }
+      if(offDays>=DAYS) return '';
+      if(offDays+durDays>DAYS) durDays = DAYS-offDays;
+      const left = labelW + offDays*colW;
+      const width = Math.max(durDays*colW - 4, 18);
+      const colorMap = {confirmed:'var(--good)',pending:'var(--warn)',completed:'var(--deep)'};
+      const bg = colorMap[e.status]||'var(--teal)';
+      const tip = `${e.title} · ${e.package||''} · ${money(e.total_price)} · ${e.status}`;
+      return `<div title="${tip.replace(/"/g,'&quot;')}" onclick="openBookingFromCal(${e.id})"
+        style="position:absolute;top:6px;left:${left}px;width:${width}px;height:${rowH-12}px;
+        background:${bg};color:#fff;border-radius:4px;padding:0 6px;font-size:11px;line-height:${rowH-12}px;
+        white-space:nowrap;overflow:hidden;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.2)">
+        ${e.title}${e.package?' · '+e.package:''}</div>`;
+    }).join('');
+    const dayCells = days.map(d=>`<div style="border-left:1px solid var(--line);background:${isWeekend(d)?'rgba(15,106,125,.05)':'transparent'}"></div>`).join('');
+    return `<div style="position:relative;display:grid;grid-template-columns:${labelW}px repeat(${DAYS},${colW}px);height:${rowH}px;border-bottom:1px solid var(--line);background:${ri%2?'rgba(244,239,230,.4)':'#fff'}">
+      <div style="padding:8px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px;border-right:2px solid var(--line)">
+        <span class="pill" style="font-size:9px">${a.type}</span>${a.name}</div>
+      ${dayCells}${bars}</div>`;
+  }).join('');
+
+  let legend = `<div style="display:flex;gap:16px;margin-top:14px;font-size:12px;color:var(--mut)">
+    <span><span style="display:inline-block;width:12px;height:12px;background:var(--good);border-radius:2px;vertical-align:middle"></span> confirmed</span>
+    <span><span style="display:inline-block;width:12px;height:12px;background:var(--warn);border-radius:2px;vertical-align:middle"></span> pending</span>
+    <span><span style="display:inline-block;width:12px;height:12px;background:var(--deep);border-radius:2px;vertical-align:middle"></span> completed</span>
+    <span style="margin-left:auto">Tip: click a booking to open it</span></div>`;
+
+  v.innerHTML = header + `<div class="panel" style="padding:0;overflow-x:auto">
+    <div style="min-width:${labelW+DAYS*colW}px">${colHead}${rows||'<div class="empty">No vessels</div>'}</div></div>` + legend;
+}
+function calNav(deltaDays){
+  if(deltaDays===0){ window._calStart=null; }
+  else { const d = new Date(window._calStart||new Date()); d.setDate(d.getDate()+deltaDays); window._calStart=d.toISOString(); }
+  go('Calendar');
+}
+async function openBookingFromCal(id){
+  try{ const b = await api('/api/bookings/'+id);
+    openModal(`<h3>Booking #${b.id}</h3>
+      <div style="font-size:13px;line-height:1.8">
+      <div><b>Package:</b> ${b.package_name||'—'}</div>
+      <div><b>Start:</b> ${fmt(b.start_datetime)}</div>
+      <div><b>End:</b> ${fmt(b.end_datetime)}</div>
+      <div><b>Total:</b> ${money(b.total_price)} · <b>Deposit:</b> ${money(b.deposit_amount)}</div>
+      <div><b>Status:</b> ${statusTag(b.status)}</div></div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+      ${b.status==='pending'?`<button class="btn btn-sm" onclick="confirmB(${b.id});closeModal()">Confirm</button>`:''}
+      ${b.status!=='cancelled'&&b.status!=='completed'?`<button class="btn btn-sm btn-ghost" onclick="cancelB(${b.id});closeModal()">Cancel</button>`:''}
+      <button class="btn btn-sm btn-ghost" onclick="closeModal()">Close</button></div>`);
+  }catch(e){ alert(e.message); }
+}
+
 
 // auto-login if token cached
 const cached = sessionStorage.getItem('tok');

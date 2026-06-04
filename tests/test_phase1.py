@@ -52,3 +52,12 @@ def test_resolve_needs_human(client, auth):
     client.post(f"/api/emails/needs-human/{cust['id']}/resolve", headers=auth)
     lst2 = client.get("/api/emails/needs-human", headers=auth).json()
     assert not any(c["customer_id"] == cust["id"] for c in lst2)
+
+
+def test_calendar_endpoint(client, auth):
+    r = client.get("/api/calendar", headers=auth)
+    assert r.status_code == 200
+    body = r.json()
+    assert "assets" in body and "events" in body and "range" in body
+    # real fleet has 12 vessels
+    assert len(body["assets"]) == 12
