@@ -13,7 +13,7 @@ from app.core.logging import configure_logging, get_logger
 from app.core.database import Base, engine, SessionLocal
 from app.api.routes import (auth, assets, customers, bookings, availability,
                             messages, emails, reports, webhooks, dashboard, packages,
-                            transfers, calendar)
+                            transfers, calendar, mailboxes)
 
 configure_logging(settings.debug)
 log = get_logger("main")
@@ -50,7 +50,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 for r in (auth, assets, customers, bookings, availability, messages,
-          emails, reports, webhooks, dashboard, packages, transfers, calendar):
+          emails, reports, webhooks, dashboard, packages, transfers, calendar, mailboxes):
     app.include_router(r.router)
 
 

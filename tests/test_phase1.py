@@ -61,3 +61,55 @@ def test_calendar_endpoint(client, auth):
     assert "assets" in body and "events" in body and "range" in body
     # real fleet has 12 vessels
     assert len(body["assets"]) == 12
+
+
+def test_multi_mailbox_parsing():
+    import os
+    from app.core.config import Settings
+    os.environ["MAILBOXES_JSON"] = (
+        '[{"address":"info@one.com","username":"info@one.com","password":"p1",'
+        '"imap_host":"mail.srv.com","smtp_host":"mail.srv.com"},'
+        '{"address":"info@two.com","username":"info@two.com","password":"p2",'
+        '"imap_host":"mail.srv.com","smtp_host":"mail.srv.com"}]'
+    )
+    s = Settings()
+    boxes = s.mailboxes()
+    assert len(boxes) == 2
+    assert boxes[0]["address"] == "info@one.com"
+    assert boxes[1]["imap_host"] == "mail.srv.com"
+    del os.environ["MAILBOXES_JSON"]
+
+
+def test_empty_mailboxes_safe():
+    import os
+    os.environ.pop("MAILBOXES_JSON", None)
+    from app.core.config import Settings
+    s = Settings(email_imap_host="", email_username="")
+    assert s.mailboxes() == []
+
+
+def test_mailbox_crud_and_password_security(client, auth):
+    # create
+    r = client.post("/api/mailboxes", headers=auth, json={
+        "address": "info@test.com", "password": "secret123",
+        "imap_host": "mail.test.com", "smtp_host": "mail.test.com"})
+    assert r.status_code == 200
+    body = r.json()
+    # password must NEVER be returned
+    assert "password" not in body
+    assert body["has_password"] is True
+    mid = body["id"]
+
+    # list
+    lst = client.get("/api/mailboxes", headers=auth).json()
+    assert any(m["address"] == "info@test.com" for m in lst)
+
+    # edit without password keeps the old one
+    client.patch(f"/api/mailboxes/{mid}", headers=auth, json={
+        "address": "info@test.com", "imap_host": "mail.test.com",
+        "smtp_host": "mail.test.com", "password": ""})
+    still = next(m for m in client.get("/api/mailboxes", headers=auth).json() if m["id"] == mid)
+    assert still["has_password"] is True
+
+    # delete
+    assert client.delete(f"/api/mailboxes/{mid}", headers=auth).status_code == 200

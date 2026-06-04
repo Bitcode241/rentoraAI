@@ -59,11 +59,13 @@ def _extract_body(msg: email.message.Message) -> str:
 
 
 class ImapSmtpEmailService:
-    def __init__(self):
-        self.enabled = bool(settings.email_imap_host and settings.email_smtp_host
-                            and settings.email_username)
-        if not self.enabled:
-            log.info("email_disabled", reason="imap_smtp_not_configured")
+    """Handles ONE mailbox. Configured by a dict from settings.mailboxes()."""
+
+    def __init__(self, mailbox: dict | None = None):
+        self.box = mailbox or {}
+        self.address = self.box.get("address", "")
+        self.enabled = bool(self.box.get("imap_host") and self.box.get("smtp_host")
+                            and self.box.get("username"))
 
     # ---- reading ----
     def list_unread(self, max_results: int = 10) -> List[Dict]:
@@ -71,8 +73,8 @@ class ImapSmtpEmailService:
             return []
         out: List[Dict] = []
         try:
-            conn = imaplib.IMAP4_SSL(settings.email_imap_host, settings.email_imap_port)
-            conn.login(settings.email_username, settings.email_password)
+            conn = imaplib.IMAP4_SSL(self.box["imap_host"], self.box["imap_port"])
+            conn.login(self.box["username"], self.box["password"])
             conn.select("INBOX")
             status, data = conn.search(None, "UNSEEN")
             if status != "OK":
@@ -80,7 +82,6 @@ class ImapSmtpEmailService:
                 return []
             ids = data[0].split()
             for mid in ids[:max_results]:
-                # PEEK so we don't mark read until we choose to
                 status, msgdata = conn.fetch(mid, "(BODY.PEEK[])")
                 if status != "OK":
                     continue
@@ -97,50 +98,111 @@ class ImapSmtpEmailService:
                     "body": _extract_body(msg),
                     "references": msg.get("References", ""),
                     "in_reply_to": msg.get("Message-ID", ""),
+                    "mailbox": self.address,   # which of our addresses received it
                 })
             conn.logout()
         except Exception as e:  # pragma: no cover
-            log.warning("imap_list_failed", error=str(e))
+            log.warning("imap_list_failed", error=str(e), mailbox=self.address)
         return out
 
     def mark_read(self, message_id: str):
         if not self.enabled:
             return
         try:
-            conn = imaplib.IMAP4_SSL(settings.email_imap_host, settings.email_imap_port)
-            conn.login(settings.email_username, settings.email_password)
+            conn = imaplib.IMAP4_SSL(self.box["imap_host"], self.box["imap_port"])
+            conn.login(self.box["username"], self.box["password"])
             conn.select("INBOX")
             conn.store(message_id, "+FLAGS", "\\Seen")
             conn.logout()
         except Exception as e:  # pragma: no cover
-            log.warning("imap_mark_failed", error=str(e))
+            log.warning("imap_mark_failed", error=str(e), mailbox=self.address)
 
     # ---- sending ----
     def send(self, to: str, subject: str, body: str, thread_id: str = "") -> str:
         if not self.enabled:
-            log.info("email_send_simulated", to=to, subject=subject)
+            log.info("email_send_simulated", to=to, subject=subject, mailbox=self.address)
             return "simulated"
         try:
             mime = MIMEText(body, "plain", "utf-8")
             mime["To"] = to
-            mime["From"] = settings.email_from or settings.email_username
+            mime["From"] = self.address or self.box["username"]
             mime["Subject"] = subject
             if thread_id:
                 mime["In-Reply-To"] = thread_id
                 mime["References"] = thread_id
-            if settings.email_use_ssl:
-                server = smtplib.SMTP_SSL(settings.email_smtp_host, settings.email_smtp_port)
+            if self.box.get("use_ssl", True):
+                server = smtplib.SMTP_SSL(self.box["smtp_host"], self.box["smtp_port"])
             else:
-                server = smtplib.SMTP(settings.email_smtp_host, settings.email_smtp_port)
+                server = smtplib.SMTP(self.box["smtp_host"], self.box["smtp_port"])
                 server.starttls()
-            server.login(settings.email_username, settings.email_password)
+            server.login(self.box["username"], self.box["password"])
             server.send_message(mime)
             server.quit()
-            log.info("email_sent", to=to, subject=subject)
+            log.info("email_sent", to=to, subject=subject, mailbox=self.address)
             return "sent"
         except Exception as e:  # pragma: no cover
-            log.warning("smtp_send_failed", error=str(e))
+            log.warning("smtp_send_failed", error=str(e), mailbox=self.address)
             return ""
 
 
-imap_smtp_service = ImapSmtpEmailService()
+class MultiMailboxManager:
+    """Manages all configured mailboxes. Replies always go out from the address
+    that received the message.
+
+    Source of mailboxes (in priority order):
+      1. Database (admin-panel managed) — the real, sellable way
+      2. .env MAILBOXES_JSON or single EMAIL_* — fallback for bootstrapping
+    """
+
+    def __init__(self, mailboxes: list | None = None):
+        self.services = {}
+        boxes = mailboxes if mailboxes is not None else settings.mailboxes()
+        for box in boxes:
+            svc = ImapSmtpEmailService(box)
+            if svc.enabled:
+                self.services[svc.address] = svc
+        self.enabled = len(self.services) > 0
+        if self.enabled:
+            log.info("mailboxes_loaded", count=len(self.services),
+                     addresses=list(self.services.keys()))
+
+    @classmethod
+    def from_db(cls, db):
+        """Build the manager from active mailboxes stored in the database."""
+        from app.models.mailbox import Mailbox
+        rows = db.query(Mailbox).filter(Mailbox.active.is_(True)).all()
+        boxes = [{
+            "address": m.address, "username": m.username, "password": m.password,
+            "imap_host": m.imap_host, "smtp_host": m.smtp_host,
+            "imap_port": m.imap_port, "smtp_port": m.smtp_port, "use_ssl": m.use_ssl,
+        } for m in rows]
+        if boxes:
+            return cls(mailboxes=boxes)
+        # No DB mailboxes yet -> fall back to .env so nothing breaks during setup
+        return cls()
+
+    def list_all_unread(self, max_per_box: int = 10) -> List[Dict]:
+        out = []
+        for svc in self.services.values():
+            out.extend(svc.list_unread(max_results=max_per_box))
+        return out
+
+    def reply_from(self, mailbox_address: str, to: str, subject: str,
+                   body: str, thread_id: str = "") -> str:
+        svc = self.services.get(mailbox_address)
+        if not svc:
+            svc = next(iter(self.services.values()), None)
+        if not svc:
+            log.info("email_send_simulated", to=to, subject=subject)
+            return "simulated"
+        return svc.send(to, subject, body, thread_id)
+
+    def mark_read(self, mailbox_address: str, message_id: str):
+        svc = self.services.get(mailbox_address)
+        if svc:
+            svc.mark_read(message_id)
+
+
+# Backwards-compatible single-service handle (first .env mailbox, if any)
+_boxes = settings.mailboxes()
+imap_smtp_service = ImapSmtpEmailService(_boxes[0] if _boxes else None)

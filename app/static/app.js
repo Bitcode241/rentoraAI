@@ -1,6 +1,6 @@
 const API = '';
 let TOKEN = '';
-const PAGES = ['Dashboard','Calendar','Assets','Transfers','Bookings','Customers','Email Inbox',
+const PAGES = ['Dashboard','Calendar','Assets','Transfers','Bookings','Customers','Email Inbox','Mail Settings',
   'Revenue Overview','Upcoming Reservations',
   "Today's Reservations",'Recent Conversations'];
 const SUBS = {
@@ -10,6 +10,7 @@ const SUBS = {
   'Bookings':'All reservations across channels',
   'Customers':'Customer profiles & history',
   'Email Inbox':'Mail threads & detected intent',
+  'Mail Settings':'Email accounts the AI watches & replies from',
   'Calendar':'Visual schedule — bookings per vessel',
   'Revenue Overview':'Earnings & deposits held',
   'Upcoming Reservations':'Forward booking pipeline',
@@ -110,6 +111,20 @@ const RENDER = {
       <td class="row-actions"><button class="btn btn-sm btn-ghost" onclick="zoneModal(${x.id})">Edit</button>
       <button class="btn btn-sm btn-ghost" onclick="delZone(${x.id})">Delete</button></td></tr>`).join('')
       ||'<tr><td colspan=5 class="empty">No transfer zones yet</td></tr>'}</tbody></table></div>`;
+  },
+  'Mail Settings': async (v)=>{
+    const boxes = await api('/api/mailboxes');
+    v.innerHTML = `<div class="toolbar"><button class="btn btn-sm" onclick="mailboxModal()">+ Add email account</button>
+      <span style="color:var(--mut);font-size:12px">The AI watches these inboxes and replies from the SAME address that received the message.</span></div>
+      <div class="panel"><table><thead><tr><th>Address</th><th>IMAP host</th><th>SMTP host</th><th>Password</th><th>Status</th><th></th></tr></thead>
+      <tbody>${boxes.map(m=>`<tr><td><b>${m.address}</b></td><td class="mono" style="font-size:11px">${m.imap_host}:${m.imap_port}</td>
+      <td class="mono" style="font-size:11px">${m.smtp_host}:${m.smtp_port}</td>
+      <td>${m.has_password?'<span class="badge-live">● set</span>':'<span class="badge-off">○ none</span>'}</td>
+      <td>${m.active?'<span class="badge-live">● active</span>':'<span class="badge-off">○ off</span>'}</td>
+      <td class="row-actions"><button class="btn btn-sm btn-ghost" onclick="testMailbox(${m.id})">Test</button>
+      <button class="btn btn-sm btn-ghost" onclick="mailboxModal(${m.id})">Edit</button>
+      <button class="btn btn-sm btn-ghost" onclick="delMailbox(${m.id})">Delete</button></td></tr>`).join('')
+      ||'<tr><td colspan=6 class="empty">No email accounts yet — add one so the AI can answer mail</td></tr>'}</tbody></table></div>`;
   },
   'Bookings': async (v)=>{
     const b = await api('/api/bookings');
@@ -438,6 +453,46 @@ async function openBookingFromCal(id){
       ${b.status!=='cancelled'&&b.status!=='completed'?`<button class="btn btn-sm btn-ghost" onclick="cancelB(${b.id});closeModal()">Cancel</button>`:''}
       <button class="btn btn-sm btn-ghost" onclick="closeModal()">Close</button></div>`);
   }catch(e){ alert(e.message); }
+}
+
+
+
+async function mailboxModal(id){
+  let m = {imap_port:993,smtp_port:465,use_ssl:true,active:true,
+           imap_host:'mail.kljucevidubrovnik.com',smtp_host:'mail.kljucevidubrovnik.com'};
+  if(id){ const all = await api('/api/mailboxes'); m = all.find(x=>x.id===id)||m; }
+  openModal(`<h3>${id?'Edit':'Add'} email account</h3>
+    <label>Email address (e.g. info@seagulldubrovnik.com)</label><input id="mb_addr" value="${m.address||''}">
+    <label>Username (usually same as address)</label><input id="mb_user" value="${m.username||m.address||''}">
+    <label>Password ${id?'(leave blank to keep current)':''}</label><input id="mb_pass" type="password" value="">
+    <label>IMAP host</label><input id="mb_imap" value="${m.imap_host||''}">
+    <label>SMTP host</label><input id="mb_smtp" value="${m.smtp_host||''}">
+    <div style="display:flex;gap:8px">
+      <div style="flex:1"><label>IMAP port</label><input id="mb_iport" type="number" value="${m.imap_port||993}"></div>
+      <div style="flex:1"><label>SMTP port</label><input id="mb_sport" type="number" value="${m.smtp_port||465}"></div>
+    </div>
+    <div class="err" id="merr"></div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+    <button class="btn" onclick="saveMailbox(${id||0})">Save</button>
+    <button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
+}
+async function saveMailbox(id){
+  const p = {address:val('mb_addr'),username:val('mb_user')||val('mb_addr'),
+    password:val('mb_pass'),imap_host:val('mb_imap'),smtp_host:val('mb_smtp'),
+    imap_port:+val('mb_iport'),smtp_port:+val('mb_sport'),use_ssl:true,active:true};
+  // on create, password required; on edit, blank means keep
+  if(!id && !p.password){ document.getElementById('merr').textContent='Password is required'; return; }
+  try{ await api(id?'/api/mailboxes/'+id:'/api/mailboxes',
+    {method:id?'PATCH':'POST',body:JSON.stringify(p)});
+    closeModal(); go('Mail Settings'); }
+  catch(e){ document.getElementById('merr').textContent=e.message; }
+}
+async function delMailbox(id){ if(!confirm('Delete this email account?'))return;
+  await api('/api/mailboxes/'+id,{method:'DELETE'}); go('Mail Settings'); }
+async function testMailbox(id){
+  try{ const r = await api('/api/mailboxes/'+id+'/test',{method:'POST'});
+    alert(r.ok ? '✓ Connection successful' : '✗ Failed: '+r.message); }
+  catch(e){ alert('Error: '+e.message); }
 }
 
 

@@ -53,9 +53,19 @@ def _extract_email(addr: str) -> str:
 
 
 def process_unread(db: Session, max_results: int = 10) -> list:
+    from app.integrations.email_imap import MultiMailboxManager
+    mailbox_manager = MultiMailboxManager.from_db(db)
     processed = []
-    for em in email_service.list_unread(max_results=max_results):
+    if mailbox_manager.enabled:
+        inbox = mailbox_manager.list_all_unread(max_per_box=max_results)
+        use_manager = True
+    else:
+        inbox = email_service.list_unread(max_results=max_results)
+        use_manager = False
+
+    for em in inbox:
         sender_email = em.get("from_email") or _extract_email(em.get("from", ""))
+        mailbox = em.get("mailbox", "")   # which of our addresses received it
         customer = conversation_service.find_or_create_customer(
             db, email=sender_email, full_name=sender_email)
 
@@ -85,14 +95,19 @@ def process_unread(db: Session, max_results: int = 10) -> list:
         # Escalation gate: only auto-send when allowed AND the agent is confident.
         auto = settings.ai_auto_send and not result["needs_human"] and result["reply"]
         if auto:
-            email_service.send(sender_email, f"Re: {em.get('subject', '')}",
-                               result["reply"], thread_id=em.get("in_reply_to", ""))
+            subject = f"Re: {em.get('subject', '')}"
+            if use_manager:
+                # reply FROM the address that received the message
+                mailbox_manager.reply_from(mailbox, sender_email, subject,
+                                           result["reply"], thread_id=em.get("in_reply_to", ""))
+            else:
+                email_service.send(sender_email, subject, result["reply"],
+                                   thread_id=em.get("in_reply_to", ""))
             conversation_service.add_message(db, customer.id, "email", "outbound",
                                              result["reply"])
             thread.intent = intent
             db.commit()
         else:
-            # Hold for human: flag the conversation, store the draft as metadata.
             conv = conversation_service.get_or_create_conversation(db, customer.id)
             conv.needs_human = True
             db.commit()
@@ -101,8 +116,12 @@ def process_unread(db: Session, max_results: int = 10) -> list:
                     db, customer.id, "email", "outbound",
                     "[DRAFT — awaiting human review] " + result["reply"])
 
-        email_service.mark_read(em.get("id", ""))
+        if use_manager:
+            mailbox_manager.mark_read(mailbox, em.get("id", ""))
+        else:
+            email_service.mark_read(em.get("id", ""))
         processed.append({"customer_id": customer.id, "intent": intent,
+                          "mailbox": mailbox,
                           "needs_human": result["needs_human"],
                           "auto_sent": bool(auto)})
     log.info("emails_processed", count=len(processed))
