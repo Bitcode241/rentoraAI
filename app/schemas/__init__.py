@@ -61,6 +61,12 @@ class AssetBase(BaseModel):
     location: str = ""
     calendar_id: str = ""
     active: bool = True
+    # External (partner) asset fields
+    is_external: bool = False
+    owner_name: str = ""
+    owner_email: str = ""
+    owner_phone: str = ""
+    commission_percent: float = 0.0
 
 
 class AssetCreate(AssetBase):
@@ -82,6 +88,11 @@ class AssetUpdate(BaseModel):
     location: Optional[str] = None
     calendar_id: Optional[str] = None
     active: Optional[bool] = None
+    is_external: Optional[bool] = None
+    owner_name: Optional[str] = None
+    owner_email: Optional[str] = None
+    owner_phone: Optional[str] = None
+    commission_percent: Optional[float] = None
 
 
 class AssetOut(AssetBase):

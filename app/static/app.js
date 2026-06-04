@@ -91,7 +91,7 @@ const RENDER = {
     v.innerHTML = `<div class="toolbar"><button class="btn btn-sm" onclick="assetModal()">+ New asset</button></div>
       <div class="panel"><table><thead><tr><th>Name</th><th>Type</th><th>Cap.</th>
       <th>Packages</th><th>Deposit</th><th>Calendar</th><th>Status</th><th></th></tr></thead>
-      <tbody>${a.map(x=>`<tr><td><b>${x.name}</b></td><td><span class="pill">${x.asset_type}</span></td>
+      <tbody>${a.map(x=>`<tr><td><b>${x.name}</b>${x.is_external?` <span class="pill" style="background:var(--warn);color:#fff" title="Partnerski brod — ${x.owner_name||'vlasnik'}, ${x.commission_percent||0}% provizija">partner</span>`:''}</td><td><span class="pill">${x.asset_type}</span></td>
       <td>${x.capacity}</td>
       <td style="font-size:12px">${(x.packages||[]).map(p=>`${p.name} ${money(p.price)}`).join(' · ')||'—'}</td>
       <td>${x.deposit_percent?x.deposit_percent+'%':money(x.deposit)}</td>
@@ -210,6 +210,18 @@ async function assetModal(id){
     <label>Deposit %</label><input id="m_deppct" type="number" value="${a.deposit_percent||0}">
     <label>Calendar ID</label><input id="m_cal" value="${a.calendar_id||''}">
     <label>Location</label><input id="m_loc" value="${a.location||''}">
+    <div style="margin-top:14px;padding:12px;border:1px dashed var(--line);border-radius:6px;background:rgba(15,106,125,.04)">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:600;cursor:pointer">
+        <input type="checkbox" id="m_ext" ${a.is_external?'checked':''} onchange="document.getElementById('extfields').style.display=this.checked?'block':'none'">
+        Vanjski brod (partnerski — nije moj)</label>
+      <div id="extfields" style="display:${a.is_external?'block':'none'};margin-top:10px">
+        <p style="color:var(--mut);font-size:12px;margin-bottom:8px">AI će prije potvrde pitati vlasnika je li slobodno. Gost ovo ne vidi.</p>
+        <label>Ime vlasnika</label><input id="m_oname" value="${a.owner_name||''}">
+        <label>Email vlasnika</label><input id="m_oemail" value="${a.owner_email||''}">
+        <label>WhatsApp/telefon vlasnika</label><input id="m_ophone" value="${a.owner_phone||''}" placeholder="+385...">
+        <label>Moja provizija (%)</label><input id="m_comm" type="number" value="${a.commission_percent||15}">
+      </div>
+    </div>
     ${id?`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
       <label style="font-weight:600">Packages</label>
       <div id="m_pkgs" style="font-size:13px;margin:6px 0">loading…</div>
@@ -244,7 +256,10 @@ async function addPkg(assetId){
 async function delPkg(pid,assetId){ await api('/api/packages/'+pid,{method:'DELETE'}); loadPkgs(assetId); }
 async function saveAsset(id){
   const p = {name:val('m_name'),asset_type:val('m_type'),capacity:+val('m_cap'),
-    deposit_percent:+val('m_deppct'),calendar_id:val('m_cal'),location:val('m_loc')};
+    deposit_percent:+val('m_deppct'),calendar_id:val('m_cal'),location:val('m_loc'),
+    is_external:document.getElementById('m_ext').checked,
+    owner_name:val('m_oname'),owner_email:val('m_oemail'),
+    owner_phone:val('m_ophone'),commission_percent:+val('m_comm')};
   try{ await api(id?'/api/assets/'+id:'/api/assets',
     {method:id?'PATCH':'POST',body:JSON.stringify(p)});
     closeModal(); go('Assets'); }
@@ -334,7 +349,7 @@ async function showConvo(id,name){
       :'<div class="empty">No messages yet</div>'}</div>
     <div style="margin-top:14px"><button class="btn btn-ghost" onclick="closeModal()">Close</button></div>`);
 }
-function val(id){ return document.getElementById(id).value; }
+function val(id){ const el=document.getElementById(id); return el?el.value:''; }
 
 
 async function zoneModal(id){

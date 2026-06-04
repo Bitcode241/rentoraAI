@@ -22,6 +22,15 @@ class Asset(Base):
     location: Mapped[str] = mapped_column(String(128), default="")
     calendar_id: Mapped[str] = mapped_column(String(255), default="")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # External (partner) assets: not owned by the business. The AI must ask the
+    # owner for availability before confirming. Only the super-admin manages these.
+    is_external: Mapped[bool] = mapped_column(Boolean, default=False)
+    owner_name: Mapped[str] = mapped_column(String(128), default="")
+    owner_email: Mapped[str] = mapped_column(String(255), default="")
+    owner_phone: Mapped[str] = mapped_column(String(64), default="")  # WhatsApp later
+    commission_percent: Mapped[float] = mapped_column(Float, default=0.0)  # your cut, e.g. 15
+
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

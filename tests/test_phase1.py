@@ -133,3 +133,16 @@ def test_email_filter_rental_only():
     # business / junk -> ignored
     assert detect_intent("Ponuda za suradnju i fakturiranje") not in RENTAL_INTENTS
     assert detect_intent("Racun za struju") not in RENTAL_INTENTS
+
+
+def test_external_asset(client, auth):
+    r = client.post("/api/assets", headers=auth, json={
+        "name": "Partner Boat", "asset_type": "boat", "capacity": 8,
+        "deposit_percent": 30, "is_external": True, "owner_name": "Marko",
+        "owner_email": "marko@example.com", "owner_phone": "+385991234567",
+        "commission_percent": 15})
+    assert r.status_code == 200
+    a = r.json()
+    assert a["is_external"] is True
+    assert a["owner_email"] == "marko@example.com"
+    assert a["commission_percent"] == 15
