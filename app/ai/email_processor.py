@@ -16,23 +16,30 @@ from app.core.logging import get_logger
 log = get_logger("email-processor")
 
 REQUEST_KW = [
-    # en
-    "rent", "book", "available", "availability", "reservation", "quote", "hire",
+    # products (strongest signal of a rental inquiry) — en/hr/de
+    "boat", "boats", "jet ski", "jetski", "jet-ski", "transfer", "yacht",
+    "brod", "brodom", "gliser", "glisera", "jet ski", "skuter", "skuter na vodi",
+    "plovilo", "izlet", "vožnja",
+    "boot", "boote", "jetski",
+    # rental verbs / availability — en
+    "rent", "book", "booking", "available", "availability", "reservation",
+    "hire", "charter",
     # hr
-    "najam", "najmiti", "iznajmiti", "rezervacija", "rezervirati", "slobodno",
-    "dostupno", "cijena", "ponuda", "termin",
+    "najam", "najmiti", "iznajmiti", "iznajmljujete", "rezervacija", "rezervirati",
+    "rezervirao", "slobodno", "slobodan", "dostupno", "dostupan", "termin",
+    "trebam brod", "želim rezervirati", "zanima me najam", "zanima me brod",
     # de
-    "mieten", "buchen", "verfügbar", "reservierung", "angebot", "preis",
+    "mieten", "buchen", "verfügbar", "reservierung", "ausflug",
 ]
 CONFIRM_KW = [
     "confirm", "yes please", "go ahead", "i confirm", "accept",
-    "potvrđujem", "potvrda", "slažem se", "može", "u redu", "prihvaćam",
+    "potvrđujem", "potvrda rezervacije", "slažem se", "prihvaćam rezervaciju",
     "bestätige", "bestätigung", "einverstanden",
 ]
 CANCEL_KW = [
     "cancel", "refund", "can't make", "cannot make",
-    "otkaz", "otkazati", "otkazujem", "ne mogu doći", "povrat",
-    "stornieren", "absagen", "rückerstattung",
+    "otkaz", "otkazati", "otkazujem", "otkazujem rezervaciju", "ne mogu doći",
+    "povrat", "stornieren", "absagen", "rückerstattung",
 ]
 
 
@@ -45,6 +52,35 @@ def detect_intent(text: str) -> str:
     if any(k in t for k in REQUEST_KW):
         return "request"
     return "other"
+
+
+# Intents the AI is ALLOWED to auto-reply to. Everything else is left for a human.
+RENTAL_INTENTS = ("request", "confirmation", "cancellation")
+
+# Senders the AI must NEVER auto-reply to (system / automated / no-reply).
+# Replying to these can create mail loops and hurt server reputation.
+BLOCKED_SENDER_PATTERNS = [
+    "mailer-daemon", "postmaster", "no-reply", "noreply", "no_reply",
+    "donotreply", "do-not-reply", "bounce", "notifications@", "notification@",
+    "automated", "auto-reply", "autoreply", "daemon@", "abuse@", "root@",
+]
+
+# Subjects that signal an automated/system message (not a guest inquiry).
+BLOCKED_SUBJECT_PATTERNS = [
+    "undelivered mail", "returned to sender", "delivery status",
+    "delivery failure", "mail delivery failed", "out of office",
+    "automatic reply", "read receipt", "failure notice",
+]
+
+
+def _is_system_sender(sender_email: str, subject: str) -> bool:
+    s = (sender_email or "").lower()
+    subj = (subject or "").lower()
+    if any(p in s for p in BLOCKED_SENDER_PATTERNS):
+        return True
+    if any(p in subj for p in BLOCKED_SUBJECT_PATTERNS):
+        return True
+    return False
 
 
 def _extract_email(addr: str) -> str:
@@ -73,6 +109,24 @@ def process_unread(db: Session, max_results: int = 10) -> list:
         thread = db.query(EmailThread).filter(
             EmailThread.gmail_thread_id == thread_key).first()
         intent = detect_intent(em.get("subject", "") + " " + em.get("body", ""))
+
+        # SAFETY FILTER (before any AI call): reply ONLY to genuine rental
+        # inquiries. System/automated senders and non-rental mail are left
+        # completely untouched for the owner — no reply, no wasted AI call.
+        is_system = _is_system_sender(sender_email, em.get("subject", ""))
+        is_rental = intent in RENTAL_INTENTS
+        if is_system or not is_rental:
+            if is_system and use_manager:
+                # clear daemon/bounce noise so it doesn't pile up
+                mailbox_manager.mark_read(mailbox, em.get("id", ""))
+            log.info("email_ignored", mailbox=mailbox, intent=intent,
+                     is_system=is_system, sender=sender_email)
+            processed.append({"customer_id": customer.id, "intent": intent,
+                              "mailbox": mailbox, "ignored": True,
+                              "reason": "system_sender" if is_system else "not_rental",
+                              "auto_sent": False})
+            continue
+
         if not thread:
             thread = EmailThread(gmail_thread_id=thread_key,
                                  subject=em.get("subject", ""),
@@ -92,7 +146,6 @@ def process_unread(db: Session, max_results: int = 10) -> list:
         result = run_agent(db, em.get("body", ""), language=customer.language,
                            customer_id=customer.id)
 
-        # Escalation gate: only auto-send when allowed AND the agent is confident.
         auto = settings.ai_auto_send and not result["needs_human"] and result["reply"]
         if auto:
             subject = f"Re: {em.get('subject', '')}"

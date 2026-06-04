@@ -113,3 +113,23 @@ def test_mailbox_crud_and_password_security(client, auth):
 
     # delete
     assert client.delete(f"/api/mailboxes/{mid}", headers=auth).status_code == 200
+
+
+def test_email_filter_system_senders():
+    from app.ai.email_processor import _is_system_sender
+    assert _is_system_sender("MAILER-DAEMON@mail.x.com", "Undelivered Mail") is True
+    assert _is_system_sender("no-reply@booking.com", "Your trip") is True
+    assert _is_system_sender("postmaster@x.com", "x") is True
+    assert _is_system_sender("ivan@gmail.com", "Out of Office") is True
+    assert _is_system_sender("marko@gmail.com", "Upit za brod") is False
+
+
+def test_email_filter_rental_only():
+    from app.ai.email_processor import detect_intent, RENTAL_INTENTS
+    # rental inquiries -> answered
+    assert detect_intent("Trebam brod za 6 osoba") in RENTAL_INTENTS
+    assert detect_intent("imate li slobodan jet ski") in RENTAL_INTENTS
+    assert detect_intent("Trebam transfer od aerodroma") in RENTAL_INTENTS
+    # business / junk -> ignored
+    assert detect_intent("Ponuda za suradnju i fakturiranje") not in RENTAL_INTENTS
+    assert detect_intent("Racun za struju") not in RENTAL_INTENTS
