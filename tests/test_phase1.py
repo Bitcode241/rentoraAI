@@ -275,3 +275,29 @@ def test_refund_requires_paid(client, auth):
     # no captured deposit -> refund refused cleanly
     r = client.post(f"/api/payments/refund/{bid}", headers=auth)
     assert r.status_code == 400
+
+
+def test_whatsapp_verify(client):
+    # webhook verification handshake
+    r = client.get("/api/webhooks/whatsapp", params={
+        "hub.mode": "subscribe", "hub.verify_token": "verify-me",
+        "hub.challenge": "test123"})
+    assert r.status_code == 200
+    assert "test123" in r.text
+
+
+def test_whatsapp_ignores_status_callback(client):
+    # delivery-receipt style payload (no messages) -> ignored, no crash
+    r = client.post("/api/webhooks/whatsapp", json={
+        "entry": [{"changes": [{"value": {"statuses": [{"status": "delivered"}]}}]}]})
+    assert r.status_code == 200
+    assert r.json()["status"] in ("ignored_no_message", "received")
+
+
+def test_whatsapp_filters_non_rental(client):
+    # a business/spam message should not crash and should be flagged, not auto-replied
+    r = client.post("/api/webhooks/whatsapp", json={
+        "entry": [{"changes": [{"value": {"messages": [
+            {"from": "385991234567", "type": "text",
+             "text": {"body": "Ponuda za suradnju i fakturiranje"}}]}}]}]})
+    assert r.status_code == 200
