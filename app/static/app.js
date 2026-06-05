@@ -192,6 +192,8 @@ function bookingTable(b, full){
     <td><span class="pill">${x.source}</span></td>
     ${full?`<td class="row-actions">${x.status==='pending'?`<button class="btn btn-sm" onclick="confirmB(${x.id})">Confirm</button>`:''}
     ${(x.payment_status!=='deposit_paid')?`<button class="btn btn-sm" onclick="chargeDeposit(${x.id})">Naplati depozit</button>`:''}
+    ${(x.payment_status==='deposit_paid')?`<button class="btn btn-sm btn-ghost" onclick="sendConfirm(${x.id})">Pošalji potvrdu</button>`:''}
+    ${(x.payment_status==='deposit_paid')?`<button class="btn btn-sm btn-ghost" onclick="refundB(${x.id})">Povrat</button>`:''}
     ${x.status!=='cancelled'&&x.status!=='completed'?`<button class="btn btn-sm btn-ghost" onclick="cancelB(${x.id})">Cancel</button>`:''}</td>`:''}</tr>`).join('')}
     </tbody></table>`;
 }
@@ -520,6 +522,19 @@ function payTag(ps){
   const [label,color]=map[ps||'unpaid']||map.unpaid;
   return `<span style="font-size:11px;color:${color};font-weight:600">${label}</span>`;
 }
+
+async function sendConfirm(id){
+  try{ const r=await api('/api/payments/send-confirmation/'+id,{method:'POST'});
+    alert(r.sent?'Potvrda poslana gostu.':'Greška: '+(r.error||'nepoznato'));
+  }catch(e){ alert(e.message); }
+}
+async function refundB(id){
+  if(!confirm('Sigurno napraviti povrat depozita? Rezervacija će biti otkazana.'))return;
+  try{ const r=await api('/api/payments/refund/'+id,{method:'POST'});
+    alert('Povrat napravljen: '+(r.amount||'')+' EUR'); go('Bookings');
+  }catch(e){ alert('Greška pri povratu: '+e.message); }
+}
+
 async function chargeDeposit(id){
   try{
     const r=await api('/api/payments/checkout/'+id,{method:'POST'});

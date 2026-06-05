@@ -67,7 +67,41 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 db.commit()
                 log.info("deposit_paid_confirmed", booking_id=b.id,
                          amount=b.amount_paid)
+                # Send a professional confirmation (PDF + email) to the guest.
+                try:
+                    _send_confirmation(db, b)
+                except Exception as e:
+                    log.warning("confirmation_send_failed", booking_id=b.id, error=str(e))
     return {"received": True}
+
+
+def _send_confirmation(db, booking):
+    """Build a PDF receipt and email it to the guest in their language."""
+    from app.services import confirmation_service
+    from app.integrations.email_imap import MultiMailboxManager
+    from app.core.config import settings as _s
+    asset = db.get(Asset, booking.asset_id)
+    cust = db.get(Customer, booking.customer_id)
+    if not cust or not cust.email:
+        return
+    lang = cust.language or "en"
+    balance = max((booking.total_price or 0) - (booking.amount_paid or 0), 0)
+    when = booking.start_datetime.strftime("%d.%m.%Y %H:%M")
+    business = getattr(_s, "app_name", "Rentora")
+    pdf = confirmation_service.build_pdf(
+        lang=lang, business_name=business, booking_id=booking.id,
+        asset_name=asset.name if asset else "—", when=when,
+        guests="—", package=booking.package_name or "",
+        deposit_paid=booking.amount_paid or 0, full_price=booking.total_price or 0,
+        balance=balance, transfer_included=False,
+        location=asset.location if asset else "", currency="EUR")
+    subject, body = confirmation_service.email_text(lang, business)
+    mgr = MultiMailboxManager.from_db(db)
+    if mgr.enabled:
+        from_box = next(iter(mgr.services.keys()), "")
+        mgr.reply_from(from_box, cust.email, subject, body,
+                       attachment=pdf, attachment_name=f"potvrda-{booking.id}.pdf")
+        log.info("confirmation_sent", booking_id=booking.id, to=cust.email, lang=lang)
 
 
 @router.get("/config")
@@ -76,4 +110,43 @@ def payment_config(_=Depends(get_current_user)):
     return {"enabled": settings.stripe_enabled(),
             "currency": settings.stripe_currency,
             "publishable_key": settings.stripe_publishable_key}
+
+
+@router.post("/send-confirmation/{booking_id}")
+def send_confirmation_manual(booking_id: int, db: Session = Depends(get_db),
+                             _=Depends(get_current_user)):
+    """Manually (re)send the confirmation PDF — useful for testing or resending."""
+    b = db.get(Booking, booking_id)
+    if not b:
+        raise HTTPException(404, "Booking not found")
+    try:
+        _send_confirmation(db, b)
+        return {"sent": True}
+    except Exception as e:
+        return {"sent": False, "error": str(e)}
+
+
+@router.post("/refund/{booking_id}")
+def refund_booking(booking_id: int, db: Session = Depends(get_db),
+                   _=Depends(get_current_user)):
+    """Refund the deposit paid for a booking via Stripe, and cancel it."""
+    b = db.get(Booking, booking_id)
+    if not b:
+        raise HTTPException(404, "Booking not found")
+    if b.payment_status != "deposit_paid" or not b.stripe_payment_intent:
+        raise HTTPException(400, "No captured deposit to refund.")
+    stripe = payment_service._client()
+    if not stripe:
+        raise HTTPException(400, "Stripe not configured")
+    try:
+        refund = stripe.Refund.create(payment_intent=b.stripe_payment_intent)
+        b.payment_status = "refunded"
+        b.status = "cancelled"
+        db.commit()
+        log.info("refund_done", booking_id=b.id, refund=refund.id)
+        return {"refunded": True, "amount": b.amount_paid}
+    except Exception as e:
+        log.warning("refund_failed", booking_id=b.id, error=str(e))
+        raise HTTPException(400, f"Refund failed: {e}")
+
 

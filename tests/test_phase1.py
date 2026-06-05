@@ -201,7 +201,8 @@ def test_payment_config_endpoint(client, auth):
 def test_pay_success_page(client):
     r = client.get("/pay/success")
     assert r.status_code == 200
-    assert "depozit" in r.text.lower() or "hvala" in r.text.lower()
+    # multilingual now — default English when no booking given
+    assert "thank you" in r.text.lower() or "deposit" in r.text.lower()
 
 
 def test_checkout_requires_stripe(client, auth):
@@ -223,3 +224,54 @@ def test_checkout_requires_stripe(client, auth):
     assert r.status_code == 200
     # stripe not configured in tests -> clean error, not a crash
     assert r.json().get("error") == "stripe_not_configured"
+
+
+def test_confirmation_pdf_all_languages():
+    from app.services import confirmation_service as cs
+    for lang in ("hr", "en", "de"):
+        pdf = cs.build_pdf(lang=lang, business_name="Rentora", booking_id=1,
+                           asset_name="4K Marine", when="12.06.2026 09:00",
+                           guests=6, package="4h", deposit_paid=135,
+                           full_price=450, balance=315, transfer_included=False,
+                           location="Dubrovnik")
+        assert pdf[:4] == b"%PDF"
+        subj, body = cs.email_text(lang, "Rentora")
+        assert subj and body
+
+
+def test_send_confirmation_endpoint(client, auth):
+    from app.core.database import SessionLocal
+    from app.models.booking import Booking
+    from app.models.customer import Customer
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    c = Customer(full_name="Conf Test", email="conf@x.com", language="hr")
+    db.add(c); db.commit(); db.refresh(c)
+    s = datetime.now(timezone.utc) + timedelta(days=9)
+    b = Booking(asset_id=1, customer_id=c.id, start_datetime=s,
+                end_datetime=s + timedelta(hours=4), total_price=450,
+                deposit_amount=135, amount_paid=135, status="confirmed",
+                payment_status="deposit_paid", package_name="4h")
+    db.add(b); db.commit(); bid = b.id
+    db.close()
+    r = client.post(f"/api/payments/send-confirmation/{bid}", headers=auth)
+    assert r.status_code == 200  # builds PDF; email simulated in tests
+
+
+def test_refund_requires_paid(client, auth):
+    from app.core.database import SessionLocal
+    from app.models.booking import Booking
+    from app.models.customer import Customer
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    c = Customer(full_name="Refund Test", email="ref@x.com")
+    db.add(c); db.commit(); db.refresh(c)
+    s = datetime.now(timezone.utc) + timedelta(days=9)
+    b = Booking(asset_id=1, customer_id=c.id, start_datetime=s,
+                end_datetime=s + timedelta(hours=4), total_price=450,
+                deposit_amount=135, status="pending", payment_status="unpaid")
+    db.add(b); db.commit(); bid = b.id
+    db.close()
+    # no captured deposit -> refund refused cleanly
+    r = client.post(f"/api/payments/refund/{bid}", headers=auth)
+    assert r.status_code == 400

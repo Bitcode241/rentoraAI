@@ -77,15 +77,35 @@ p{{color:#5a6b6f;line-height:1.5}}</style></head><body><div class="card">
 
 
 @app.get("/pay/success")
-def pay_success():
-    return _pay_page("Hvala! Depozit je zaprimljen.",
-                     "Vaša rezervacija je potvrđena. Vidimo se uskoro!")
+def pay_success(booking: int = 0):
+    from app.core.database import SessionLocal
+    from app.models.booking import Booking
+    from app.models.customer import Customer
+    msgs = {
+        "hr": ("Hvala! Depozit je zaprimljen.", "Vaša rezervacija je potvrđena. Potvrdu smo poslali na Vaš email."),
+        "en": ("Thank you! Your deposit has been received.", "Your booking is confirmed. We've emailed you the confirmation."),
+        "de": ("Vielen Dank! Ihre Anzahlung ist eingegangen.", "Ihre Buchung ist bestätigt. Die Bestätigung wurde per E-Mail gesendet."),
+    }
+    lang = "en"
+    if booking:
+        try:
+            db = SessionLocal()
+            b = db.get(Booking, booking)
+            if b:
+                c = db.get(Customer, b.customer_id)
+                if c and c.language:
+                    lang = c.language.lower()[:2]
+            db.close()
+        except Exception:
+            pass
+    title, msg = msgs.get(lang, msgs["en"])
+    return _pay_page(title, msg)
 
 
 @app.get("/pay/cancel")
 def pay_cancel():
-    return _pay_page("Plaćanje otkazano",
-                     "Rezervacija nije potvrđena. Možete pokušati ponovno ili nas kontaktirati.")
+    return _pay_page("Plaćanje otkazano / Payment cancelled",
+                     "Rezervacija nije potvrđena. / Booking not confirmed.")
 
 
 @app.exception_handler(Exception)

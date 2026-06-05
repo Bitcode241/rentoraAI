@@ -118,12 +118,23 @@ class ImapSmtpEmailService:
             log.warning("imap_mark_failed", error=str(e), mailbox=self.address)
 
     # ---- sending ----
-    def send(self, to: str, subject: str, body: str, thread_id: str = "") -> str:
+    def send(self, to: str, subject: str, body: str, thread_id: str = "",
+             attachment: bytes = None, attachment_name: str = "potvrda.pdf") -> str:
         if not self.enabled:
             log.info("email_send_simulated", to=to, subject=subject, mailbox=self.address)
             return "simulated"
         try:
-            mime = MIMEText(body, "plain", "utf-8")
+            if attachment:
+                from email.mime.multipart import MIMEMultipart
+                from email.mime.application import MIMEApplication
+                mime = MIMEMultipart()
+                mime.attach(MIMEText(body, "plain", "utf-8"))
+                part = MIMEApplication(attachment, _subtype="pdf")
+                part.add_header("Content-Disposition", "attachment",
+                                filename=attachment_name)
+                mime.attach(part)
+            else:
+                mime = MIMEText(body, "plain", "utf-8")
             mime["To"] = to
             mime["From"] = self.address or self.box["username"]
             mime["Subject"] = subject
@@ -138,7 +149,8 @@ class ImapSmtpEmailService:
             server.login(self.box["username"], self.box["password"])
             server.send_message(mime)
             server.quit()
-            log.info("email_sent", to=to, subject=subject, mailbox=self.address)
+            log.info("email_sent", to=to, subject=subject, mailbox=self.address,
+                     with_pdf=bool(attachment))
             return "sent"
         except Exception as e:  # pragma: no cover
             log.warning("smtp_send_failed", error=str(e), mailbox=self.address)
@@ -188,14 +200,15 @@ class MultiMailboxManager:
         return out
 
     def reply_from(self, mailbox_address: str, to: str, subject: str,
-                   body: str, thread_id: str = "") -> str:
+                   body: str, thread_id: str = "",
+                   attachment: bytes = None, attachment_name: str = "potvrda.pdf") -> str:
         svc = self.services.get(mailbox_address)
         if not svc:
             svc = next(iter(self.services.values()), None)
         if not svc:
             log.info("email_send_simulated", to=to, subject=subject)
             return "simulated"
-        return svc.send(to, subject, body, thread_id)
+        return svc.send(to, subject, body, thread_id, attachment, attachment_name)
 
     def mark_read(self, mailbox_address: str, message_id: str):
         svc = self.services.get(mailbox_address)
