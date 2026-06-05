@@ -44,20 +44,17 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(400, "Invalid webhook signature")
 
     if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
-        # Stripe objects aren't plain dicts; access fields defensively.
+        # Parse straight from the raw JSON payload — avoids Stripe object quirks.
+        import json as _json
         try:
-            metadata = dict(session.get("metadata") or {}) if hasattr(session, "get") else {}
+            raw = _json.loads(payload.decode("utf-8"))
+            session = raw.get("data", {}).get("object", {})
         except Exception:
-            metadata = {}
-        if not metadata:
-            # fallback: Stripe object attribute access
-            metadata = dict(getattr(session, "metadata", {}) or {})
+            session = {}
+        metadata = session.get("metadata") or {}
         booking_id = metadata.get("booking_id")
-        amount_total = (session.get("amount_total") if hasattr(session, "get")
-                        else getattr(session, "amount_total", 0)) or 0
-        payment_intent = (session.get("payment_intent") if hasattr(session, "get")
-                          else getattr(session, "payment_intent", "")) or ""
+        amount_total = session.get("amount_total") or 0
+        payment_intent = session.get("payment_intent") or ""
         if booking_id:
             b = db.get(Booking, int(booking_id))
             if b:
