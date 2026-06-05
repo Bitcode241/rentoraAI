@@ -26,6 +26,19 @@ def _poll_email_job():
         db.close()
 
 
+def _daily_reminder_job():
+    from app.services.reminder_service import send_reminders
+    db = SessionLocal()
+    try:
+        result = send_reminders(db)
+        if result.get("bookings"):
+            log.info("scheduled_reminders", **result)
+    except Exception as e:  # pragma: no cover
+        log.warning("scheduled_reminders_failed", error=str(e))
+    finally:
+        db.close()
+
+
 def start_scheduler():
     global _scheduler
     if not settings.scheduler_enabled:
@@ -37,6 +50,9 @@ def start_scheduler():
     _scheduler.add_job(_poll_email_job, "interval",
                        seconds=settings.email_poll_seconds,
                        id="poll_email", max_instances=1, coalesce=True)
+    # Day-before reminders: run every morning at 09:00 (server time).
+    _scheduler.add_job(_daily_reminder_job, "cron", hour=9, minute=0,
+                       id="daily_reminders", max_instances=1, coalesce=True)
     _scheduler.start()
     log.info("scheduler_started", every_seconds=settings.email_poll_seconds)
 

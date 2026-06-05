@@ -23,3 +23,10 @@ def update_lead_times(payload: dict, db: Session = Depends(get_db)):
             except (ValueError, TypeError):
                 pass
     return settings_service.set_lead_times(db, clean)
+
+
+@router.post("/send-reminders", dependencies=[Depends(require_admin)])
+def trigger_reminders(db: Session = Depends(get_db)):
+    """Manually run the day-before reminder job now (for testing)."""
+    from app.services.reminder_service import send_reminders
+    return send_reminders(db)

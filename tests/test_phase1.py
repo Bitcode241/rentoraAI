@@ -340,3 +340,37 @@ def test_lead_time_blocks_early_booking():
         blocked = (e.status_code == 409)
     db.close()
     assert blocked
+
+
+def test_reminder_finds_tomorrow_booking():
+    from app.core.database import SessionLocal
+    from app.services import reminder_service
+    from app.models.booking import Booking
+    from app.models.customer import Customer
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    c = Customer(full_name="Rem Guest", email="rem@x.com", language="hr")
+    db.add(c); db.commit(); db.refresh(c)
+    # booking ~24h from now, confirmed -> should be found
+    start = datetime.now(timezone.utc) + timedelta(hours=24)
+    b = Booking(asset_id=1, customer_id=c.id, start_datetime=start,
+                end_datetime=start + timedelta(hours=4), total_price=450,
+                deposit_amount=135, status="confirmed", package_name="4h")
+    db.add(b); db.commit()
+    found = reminder_service.find_tomorrow_bookings(db)
+    assert any(x.id == b.id for x in found)
+    # a booking far in the future should NOT be found
+    far = datetime.now(timezone.utc) + timedelta(days=10)
+    b2 = Booking(asset_id=1, customer_id=c.id, start_datetime=far,
+                 end_datetime=far + timedelta(hours=4), total_price=450,
+                 deposit_amount=135, status="confirmed")
+    db.add(b2); db.commit()
+    found2 = reminder_service.find_tomorrow_bookings(db)
+    assert not any(x.id == b2.id for x in found2)
+    db.close()
+
+
+def test_send_reminders_endpoint(client, auth):
+    r = client.post("/api/settings/send-reminders", headers=auth)
+    assert r.status_code == 200
+    assert "bookings" in r.json()

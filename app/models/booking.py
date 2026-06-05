@@ -1,4 +1,4 @@
-from sqlalchemy import String, Integer, Float, DateTime, func, Text, ForeignKey
+from sqlalchemy import String, Integer, Float, DateTime, func, Text, ForeignKey, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
@@ -25,6 +25,7 @@ class Booking(Base):
     amount_paid: Mapped[float] = mapped_column(Float, default=0.0)
     stripe_session_id: Mapped[str] = mapped_column(String(255), default="")
     stripe_payment_intent: Mapped[str] = mapped_column(String(255), default="")
+    reminder_sent: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     asset = relationship("Asset")

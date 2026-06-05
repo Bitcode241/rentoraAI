@@ -50,7 +50,8 @@ function boot(){
   document.getElementById('login').style.display='none';
   document.getElementById('shell').style.display='grid';
   const nav = document.getElementById('nav');
-  nav.innerHTML = PAGES.map(p=>`<a onclick="go('${p}')" data-p="${p}"><span class="dot"></span>${p}</a>`).join('');
+  nav.innerHTML = PAGES.map(p=>`<a data-p="${p.replace(/"/g,'&quot;')}"><span class="dot"></span>${p}</a>`).join('');
+  nav.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>go(a.dataset.p)));
   go('Dashboard');
 }
 function setActive(p){ document.querySelectorAll('#nav a').forEach(a=>
