@@ -301,3 +301,42 @@ def test_whatsapp_filters_non_rental(client):
             {"from": "385991234567", "type": "text",
              "text": {"body": "Ponuda za suradnju i fakturiranje"}}]}}]}]})
     assert r.status_code == 200
+
+
+def test_lead_times_get_default(client, auth):
+    r = client.get("/api/settings/lead-times", headers=auth)
+    assert r.status_code == 200
+    lt = r.json()
+    assert lt["jetski"] == 2 and lt["boat"] == 8 and lt["transfer"] == 3
+
+
+def test_lead_times_update(client, auth):
+    r = client.put("/api/settings/lead-times", headers=auth,
+                   json={"jetski": 4, "boat": 12, "transfer": 2})
+    assert r.status_code == 200
+    assert r.json()["jetski"] == 4
+    # persisted
+    r2 = client.get("/api/settings/lead-times", headers=auth)
+    assert r2.json()["boat"] == 12
+
+
+def test_lead_time_blocks_early_booking():
+    from app.core.database import SessionLocal
+    from app.services import settings_service, booking_service
+    from app.models.customer import Customer
+    from datetime import datetime, timezone, timedelta
+    from fastapi import HTTPException
+    db = SessionLocal()
+    c = Customer(full_name="LT", email="lt@x.com")
+    db.add(c); db.commit(); db.refresh(c)
+    # jetski in 1h via non-admin source -> blocked
+    soon = datetime.now(timezone.utc) + timedelta(hours=1)
+    blocked = False
+    try:
+        booking_service.create_booking(db, asset_id=7, customer_id=c.id,
+                                       start=soon, end=soon + timedelta(hours=1),
+                                       source="ai")
+    except HTTPException as e:
+        blocked = (e.status_code == 409)
+    db.close()
+    assert blocked

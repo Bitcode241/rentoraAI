@@ -26,6 +26,14 @@ def create_booking(db: Session, asset_id: int, customer_id: int,
     if not customer:
         raise HTTPException(404, "Customer not found")
 
+    # Lead-time rule: can't book inside the minimum-advance window.
+    # Admin bookings (source="admin") may override, since the owner knows best.
+    if source != "admin":
+        from app.services import settings_service
+        lt = settings_service.check_lead_time(db, asset.asset_type, start)
+        if not lt["ok"]:
+            raise HTTPException(409, lt["message"])
+
     # Rule 2 + Rule 3: no overlap, check calendar
     if not availability.is_asset_available(db, asset, start, end):
         raise HTTPException(409, "Asset not available for the requested window")

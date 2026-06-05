@@ -1,6 +1,7 @@
 const API = '';
 let TOKEN = '';
 const PAGES = ['Dashboard','Calendar','Assets','Transfers','Bookings','Customers','Email Inbox','Mail Settings',
+  'Settings',
   'Revenue Overview','Upcoming Reservations',
   "Today's Reservations",'Recent Conversations'];
 const SUBS = {
@@ -11,6 +12,7 @@ const SUBS = {
   'Customers':'Customer profiles & history',
   'Email Inbox':'Mail threads & detected intent',
   'Mail Settings':'Email accounts the AI watches & replies from',
+  'Settings':'Pravila rezervacije (vrijeme unaprijed)',
   'Calendar':'Visual schedule — bookings per vessel',
   'Revenue Overview':'Earnings & deposits held',
   'Upcoming Reservations':'Forward booking pipeline',
@@ -128,9 +130,20 @@ const RENDER = {
   },
   'Bookings': async (v)=>{
     const b = await api('/api/bookings');
-    v.innerHTML = `<div class="toolbar"><button class="btn btn-sm" onclick="bookingModal()">+ New booking</button>
-      <select id="bfilter" onchange="go('Bookings')"></select></div>
+    v.innerHTML = `<div class="toolbar"><button class="btn btn-sm" onclick="bookingModal()">+ New booking</button></div>
       <div class="panel">${bookingTable(b,true)}</div>`;
+  },
+  'Settings': async (v)=>{
+    const lt = await api('/api/settings/lead-times');
+    v.innerHTML = `<div class="panel" style="max-width:520px">
+      <h3 style="margin-top:0">Minimalno vrijeme rezervacije unaprijed</h3>
+      <p style="color:var(--mut);font-size:13px">Koliko sati prije početka gost može najkasnije rezervirati. AI neće dopustiti rezervaciju unutar ovog vremena. (Tvoje admin rezervacije nisu ograničene.)</p>
+      <label>Jet ski (sati)</label><input id="lt_jetski" type="number" min="0" value="${lt.jetski}">
+      <label>Gliseri / brodovi (sati)</label><input id="lt_boat" type="number" min="0" value="${lt.boat}">
+      <label>Transferi (sati)</label><input id="lt_transfer" type="number" min="0" value="${lt.transfer}">
+      <div style="margin-top:16px"><button class="btn" onclick="saveLeadTimes()">Spremi</button>
+      <span id="lt_msg" style="margin-left:12px;color:var(--good);font-size:13px"></span></div>
+    </div>`;
   },
   'Customers': async (v)=>{
     const c = await api('/api/customers');
@@ -533,6 +546,15 @@ async function refundB(id){
   try{ const r=await api('/api/payments/refund/'+id,{method:'POST'});
     alert('Povrat napravljen: '+(r.amount||'')+' EUR'); go('Bookings');
   }catch(e){ alert('Greška pri povratu: '+e.message); }
+}
+
+
+async function saveLeadTimes(){
+  const body={jetski:+val('lt_jetski'),boat:+val('lt_boat'),transfer:+val('lt_transfer')};
+  try{ await api('/api/settings/lead-times',{method:'PUT',body:JSON.stringify(body)});
+    document.getElementById('lt_msg').textContent='Spremljeno ✓';
+    setTimeout(()=>{const m=document.getElementById('lt_msg');if(m)m.textContent='';},2500);
+  }catch(e){ alert('Greška: '+e.message); }
 }
 
 async function chargeDeposit(id){

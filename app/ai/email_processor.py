@@ -15,41 +15,78 @@ from app.core.logging import get_logger
 
 log = get_logger("email-processor")
 
-REQUEST_KW = [
-    # products (strongest signal of a rental inquiry) — en/hr/de
-    "boat", "boats", "jet ski", "jetski", "jet-ski", "transfer", "yacht",
-    "brod", "brodom", "gliser", "glisera", "jet ski", "skuter", "skuter na vodi",
-    "plovilo", "izlet", "vožnja",
-    "boot", "boote", "jetski",
-    # rental verbs / availability — en
-    "rent", "book", "booking", "available", "availability", "reservation",
-    "hire", "charter",
-    # hr
-    "najam", "najmiti", "iznajmiti", "iznajmljujete", "rezervacija", "rezervirati",
-    "rezervirao", "slobodno", "slobodan", "dostupno", "dostupan", "termin",
-    "trebam brod", "želim rezervirati", "zanima me najam", "zanima me brod",
-    # de
-    "mieten", "buchen", "verfügbar", "reservierung", "ausflug",
+import re as _re
+
+# A rental inquiry must mention one of OUR PRODUCTS. These are matched as whole
+# words (so "book" won't match "Facebook", "transfer" won't match generic emails
+# unless it's about a transfer service in a rental context).
+PRODUCT_KW = [
+    "boat", "boats", "jet ski", "jetski", "jet-ski", "yacht", "speedboat",
+    "brod", "brodom", "broda", "gliser", "glisera", "skuter", "plovilo",
+    "boot", "boote",
 ]
+# Rental intent words — only count when a product is ALSO present (or a very
+# strong standalone rental phrase below).
+RENTAL_SIGNAL_KW = [
+    "rent", "hire", "charter", "available", "availability", "book a", "booking",
+    "reservation", "reserve",
+    "najam", "iznajmiti", "iznajmljujete", "rezervacij", "rezervirati",
+    "slobodno", "slobodan", "dostupno", "dostupan", "termin", "cijena", "cijenu",
+    "mieten", "buchen", "verfügbar", "reservierung",
+]
+# Strong standalone phrases that ARE a rental inquiry even without a product word.
+STRONG_REQUEST_KW = [
+    "rent a boat", "rent a jet ski", "boat rental", "jet ski rental",
+    "iznajmljivanje broda", "najam broda", "najam plovila", "zanima me najam",
+    "želim rezervirati", "trebam brod", "trebam gliser", "boot mieten",
+    "private transfer", "airport transfer", "transfer from", "transfer to",
+    "transfer iz", "transfer do", "transfer za", "transfer od", "prijevoz",
+    "transfer aerodrom", "aerodrom", "zračna luka", "flughafentransfer",
+    "transfer s aerodroma", "transfer do aerodroma", "pickup from",
+]
+
+
+def _has_word(text: str, words) -> bool:
+    for w in words:
+        if " " in w or "-" in w:
+            if w in text:
+                return True
+        else:
+            if _re.search(r"\b" + _re.escape(w) + r"\b", text):
+                return True
+    return False
+
+
 CONFIRM_KW = [
-    "confirm", "yes please", "go ahead", "i confirm", "accept",
-    "potvrđujem", "potvrda rezervacije", "slažem se", "prihvaćam rezervaciju",
-    "bestätige", "bestätigung", "einverstanden",
+    "yes please", "go ahead", "i confirm the booking", "confirm my booking",
+    "confirm the reservation", "potvrđujem rezervaciju", "potvrda rezervacije",
+    "prihvaćam rezervaciju", "buchung bestätigen",
+    # short but clear confirmations (used in reply to our quote)
+    "potvrđujem", "može, potvrđujem", "slažem se", "ich bestätige",
 ]
 CANCEL_KW = [
-    "cancel", "refund", "can't make", "cannot make",
-    "otkaz", "otkazati", "otkazujem", "otkazujem rezervaciju", "ne mogu doći",
-    "povrat", "stornieren", "absagen", "rückerstattung",
+    "cancel my booking", "cancel the booking", "cancel my reservation",
+    "cancel the reservation", "can't make", "cannot make",
+    "otkazati rezervaciju", "otkazujem rezervaciju", "ne mogu doći",
+    "otkaz rezervacije", "stornieren", "buchung absagen",
+    # short but clear cancellations
+    "moram otkazati", "želim otkazati", "otkazujem", "cancel booking",
 ]
 
 
 def detect_intent(text: str) -> str:
     t = (text or "").lower()
-    if any(k in t for k in CANCEL_KW):
+    # cancellation / confirmation use specific phrases (not single words) so
+    # "confirm your email" or "accept terms" no longer trigger.
+    if _has_word(t, CANCEL_KW):
         return "cancellation"
-    if any(k in t for k in CONFIRM_KW):
+    if _has_word(t, CONFIRM_KW):
         return "confirmation"
-    if any(k in t for k in REQUEST_KW):
+    # strong standalone rental phrases
+    if _has_word(t, STRONG_REQUEST_KW):
+        return "request"
+    # otherwise require a PRODUCT word AND a rental signal together
+    if _has_word(t, PRODUCT_KW) and _has_word(t, RENTAL_SIGNAL_KW):
         return "request"
     return "other"
 
