@@ -133,13 +133,20 @@ def run_agent(db: Session, message: str, language: str = "en",
                 args = json.loads(tc.function.arguments or "{}")
             except json.JSONDecodeError:
                 args = {}
-            if customer_id and "customer_id" in args is False:
+            # auto-fill customer_id if the tool needs it and the AI didn't provide it
+            if customer_id and not args.get("customer_id"):
                 args["customer_id"] = customer_id
             func = tools.TOOL_FUNCS.get(fname)
             try:
                 result = func(db, **args) if func else {"error": "unknown_tool"}
             except Exception as e:  # tool raised (e.g. not available)
                 result = {"error": str(e)}
+                needs_human = True
+            # If a booking/payment tool returned an error, flag for human so we
+            # never tell the guest something succeeded when it didn't.
+            if isinstance(result, dict) and result.get("error") and fname in (
+                    "send_deposit_link", "request_external_availability",
+                    "create_booking"):
                 needs_human = True
             actions.append({"tool": fname, "args": args, "result": result})
             history.append({"role": "tool", "tool_call_id": tc.id,
