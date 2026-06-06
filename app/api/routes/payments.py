@@ -72,7 +72,32 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     _send_confirmation(db, b)
                 except Exception as e:
                     log.warning("confirmation_send_failed", booking_id=b.id, error=str(e))
+                # Notify the owner that a guest just paid.
+                try:
+                    _notify_owner_paid(db, b)
+                except Exception as e:
+                    log.warning("owner_notify_failed", booking_id=b.id, error=str(e))
     return {"received": True}
+
+
+def _notify_owner_paid(db, booking):
+    """Email the business owner that a guest paid the deposit."""
+    from app.integrations.email_imap import MultiMailboxManager
+    asset = db.get(Asset, booking.asset_id)
+    cust = db.get(Customer, booking.customer_id)
+    mgr = MultiMailboxManager.from_db(db)
+    if not mgr.enabled:
+        return
+    box = next(iter(mgr.services.keys()), "")
+    when = booking.start_datetime.strftime("%d.%m.%Y %H:%M")
+    body = (f"Gost je platio depozit!\n\n"
+            f"Plovilo: {asset.name if asset else '—'}\n"
+            f"Termin: {when}\n"
+            f"Gost: {cust.full_name if cust else ''} ({cust.email if cust else ''})\n"
+            f"Depozit: {booking.amount_paid:.2f} EUR\n"
+            f"Ukupno: {booking.total_price:.2f} EUR\n"
+            f"Rezervacija #{booking.id} — POTVRĐENA")
+    mgr.reply_from(box, box, f"[PLAĆENO] Depozit — {asset.name if asset else 'rezervacija'} #{booking.id}", body)
 
 
 def _send_confirmation(db, booking):

@@ -374,3 +374,21 @@ def test_send_reminders_endpoint(client, auth):
     r = client.post("/api/settings/send-reminders", headers=auth)
     assert r.status_code == 200
     assert "bookings" in r.json()
+
+
+def test_send_deposit_link_tool():
+    from app.core.database import SessionLocal
+    from app.ai import tools
+    from app.models.customer import Customer
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    c = Customer(full_name="Link Guest", email="link@x.com")
+    db.add(c); db.commit(); db.refresh(c)
+    # own boat (asset 1), slot well in the future -> creates pending booking
+    start = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()
+    end = (datetime.now(timezone.utc) + timedelta(days=5, hours=4)).isoformat()
+    res = tools.send_deposit_link(db, asset_id=1, customer_id=c.id,
+                                  start=start, end=end, package_id=None)
+    # stripe not configured in tests -> clean checkout_failed, not a crash
+    assert "error" in res or res.get("status") == "awaiting_payment"
+    db.close()

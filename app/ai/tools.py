@@ -111,6 +111,45 @@ def create_booking(db: Session, asset_id: int, customer_id: int, start: str, end
             "total_price": b.total_price, "deposit": b.deposit_amount}
 
 
+def send_deposit_link(db: Session, asset_id: int, customer_id: int, start: str,
+                      end: str, package_id: int = None, guest_mailbox: str = ""):
+    """Create a pending booking and email the guest a Stripe deposit link.
+    The booking is NOT confirmed until the deposit is actually paid (the Stripe
+    webhook confirms it). Use this for OUR OWN boats/jetskis when a slot is free."""
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.services import payment_service
+    from app.integrations.email_imap import MultiMailboxManager
+    asset = db.get(Asset, asset_id)
+    if asset and getattr(asset, "is_external", False):
+        return {"error": "external_asset",
+                "message": "External boat — use request_external_availability."}
+    # create the booking; it stays pending until paid
+    b = booking_service.create_booking(db, asset_id, customer_id,
+                                        _parse(start), _parse(end),
+                                        source="ai", actor="ai-agent",
+                                        package_id=package_id)
+    cust = db.get(Customer, customer_id)
+    res = payment_service.create_deposit_checkout(
+        b, asset.name if asset else "Plovilo", cust.email if cust else "")
+    if "url" not in res:
+        return {"error": "checkout_failed", "message": res.get("message", "")}
+    b.stripe_session_id = res["session_id"]
+    b.payment_status = "awaiting_payment"
+    db.commit()
+    # email the guest the link, from the mailbox they wrote to
+    mgr = MultiMailboxManager.from_db(db)
+    if mgr.enabled and cust and cust.email:
+        from_box = guest_mailbox or next(iter(mgr.services.keys()), "")
+        deposit = b.deposit_amount or 0
+        body = (f"Pozdrav,\n\nza potvrdu rezervacije ({asset.name}) molimo uplatu "
+                f"depozita od {deposit:.2f} EUR putem sigurne poveznice:\n\n"
+                f"{res['url']}\n\nRezervacija se potvrđuje nakon uplate. Hvala!")
+        mgr.reply_from(from_box, cust.email, "Potvrda rezervacije — depozit", body)
+    return {"booking_id": b.id, "status": "awaiting_payment",
+            "message": "Deposit link sent to the guest. Booking confirms after payment."}
+
+
 def request_external_availability(db: Session, asset_id: int, customer_id: int,
                                   start: str, end: str, passengers: int,
                                   price: float, package_id: int = None,
@@ -229,6 +268,20 @@ TOOL_SCHEMAS = [
             "package_id": {"type": "integer", "description": "Chosen price package id"}},
             "required": ["asset_id", "customer_id", "start", "end"]}}},
     {"type": "function", "function": {
+        "name": "send_deposit_link",
+        "description": "For OUR OWN boats/jetskis (is_external=false): when a slot is "
+                       "free and the guest wants to book, create a pending booking and "
+                       "email the guest a Stripe deposit payment link. The booking is "
+                       "NOT confirmed until the deposit is paid. Use this instead of "
+                       "create_booking for online/email/whatsapp guests so they pay the "
+                       "deposit to confirm. Tell the guest a payment link has been sent.",
+        "parameters": {"type": "object", "properties": {
+            "asset_id": {"type": "integer"}, "customer_id": {"type": "integer"},
+            "start": {"type": "string"}, "end": {"type": "string"},
+            "package_id": {"type": "integer", "description": "Chosen price package id"},
+            "guest_mailbox": {"type": "string", "description": "Address the guest wrote to"}},
+            "required": ["asset_id", "customer_id", "start", "end"]}}},
+    {"type": "function", "function": {
         "name": "request_external_availability",
         "description": "For an EXTERNAL/partner boat (is_external=true in availability "
                        "results): ask the owner if it's free instead of booking. "
@@ -289,6 +342,7 @@ TOOL_FUNCS = {
     "get_prices": get_prices,
     "create_booking": create_booking,
     "request_external_availability": request_external_availability,
+    "send_deposit_link": send_deposit_link,
     "cancel_booking": cancel_booking,
     "get_customer_history": get_customer_history,
     "list_transfer_zones": list_transfer_zones,
