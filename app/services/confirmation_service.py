@@ -18,6 +18,7 @@ T = {
         "vessel": "Plovilo / Usluga",
         "date": "Datum i vrijeme",
         "guests": "Broj osoba",
+        "phone": "Kontakt telefon",
         "package": "Paket",
         "deposit_paid": "Plaćeni depozit",
         "full_price": "Ukupna cijena",
@@ -36,6 +37,7 @@ T = {
         "vessel": "Vessel / Service",
         "date": "Date & time",
         "guests": "Guests",
+        "phone": "Contact phone",
         "package": "Package",
         "deposit_paid": "Deposit paid",
         "full_price": "Total price",
@@ -54,6 +56,7 @@ T = {
         "vessel": "Boot / Leistung",
         "date": "Datum & Uhrzeit",
         "guests": "Personen",
+        "phone": "Telefon",
         "package": "Paket",
         "deposit_paid": "Angezahlt",
         "full_price": "Gesamtpreis",
@@ -75,7 +78,7 @@ def _t(lang: str) -> dict:
 
 def build_pdf(*, lang, business_name, booking_id, asset_name, when, guests,
               package, deposit_paid, full_price, balance, transfer_included,
-              location, currency="EUR") -> bytes:
+              location, phone="", currency="EUR") -> bytes:
     """Return a PDF receipt as bytes."""
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
@@ -114,6 +117,8 @@ def build_pdf(*, lang, business_name, booking_id, asset_name, when, guests,
     ]
     if location:
         rows.append((tr["location"], location))
+    if phone:
+        rows.append((tr["phone"], phone))
 
     c.setFillColor(ink)
     for label, value in rows:

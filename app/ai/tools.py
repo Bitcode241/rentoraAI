@@ -42,6 +42,17 @@ def _resolve_asset(db, asset_id=None, asset_name=""):
     return None
 
 
+def update_customer_phone(db: Session, customer_id: int, phone: str):
+    """Save the guest's phone number on their profile."""
+    from app.models.customer import Customer
+    c = db.get(Customer, customer_id)
+    if not c:
+        return {"error": "customer_not_found"}
+    c.phone = phone.strip()
+    db.commit()
+    return {"ok": True, "phone": c.phone}
+
+
 def find_asset_by_name(db: Session, name: str):
     """Look up one of our assets by name. Returns id/name/type or not_found."""
     a = _resolve_asset(db, asset_name=name)
@@ -187,8 +198,11 @@ def send_deposit_link(db: Session, customer_id: int, start: str,
                 f"depozita od {deposit:.2f} EUR putem sigurne poveznice:\n\n"
                 f"{res['url']}\n\nRezervacija se potvrđuje nakon uplate. Hvala!")
         mgr.reply_from(from_box, cust.email, "Potvrda rezervacije — depozit", body)
-    return {"booking_id": b.id, "status": "awaiting_payment",
-            "message": "Deposit link sent to the guest. Booking confirms after payment."}
+    return {"booking_id": b.id, "status": "awaiting_payment", "asset": asset.name,
+            "payment_url": res["url"],
+            "message": "Deposit link created and emailed. ALSO include the payment_url "
+                       "directly in your reply so the guest has it immediately. The "
+                       "booking confirms after payment."}
 
 
 def request_external_availability(db: Session, customer_id: int,
@@ -334,6 +348,12 @@ TOOL_SCHEMAS = [
         "parameters": {"type": "object", "properties": {
             "name": {"type": "string"}}, "required": ["name"]}}},
     {"type": "function", "function": {
+        "name": "update_customer_phone",
+        "description": "Save the guest's phone number on their profile when they provide it.",
+        "parameters": {"type": "object", "properties": {
+            "customer_id": {"type": "integer"}, "phone": {"type": "string"}},
+            "required": ["phone"]}}},
+    {"type": "function", "function": {
         "name": "request_external_availability",
         "description": "For an EXTERNAL/partner boat (is_external=true in availability "
                        "results): ask the owner if it's free instead of booking. "
@@ -397,6 +417,7 @@ TOOL_FUNCS = {
     "request_external_availability": request_external_availability,
     "send_deposit_link": send_deposit_link,
     "find_asset_by_name": find_asset_by_name,
+    "update_customer_phone": update_customer_phone,
     "cancel_booking": cancel_booking,
     "get_customer_history": get_customer_history,
     "list_transfer_zones": list_transfer_zones,

@@ -116,10 +116,12 @@ def _send_confirmation(db, booking):
     pdf = confirmation_service.build_pdf(
         lang=lang, business_name=business, booking_id=booking.id,
         asset_name=asset.name if asset else "—", when=when,
-        guests="—", package=booking.package_name or "",
+        guests=getattr(booking, "passengers", None) or "—",
+        package=booking.package_name or "",
         deposit_paid=booking.amount_paid or 0, full_price=booking.total_price or 0,
         balance=balance, transfer_included=False,
-        location=asset.location if asset else "", currency="EUR")
+        location=asset.location if asset else "",
+        phone=cust.phone or "", currency="EUR")
     subject, body = confirmation_service.email_text(lang, business)
     mgr = MultiMailboxManager.from_db(db)
     if mgr.enabled:

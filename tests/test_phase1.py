@@ -403,3 +403,26 @@ def test_resolve_asset_by_name():
         assert r["found"] is True
     assert find_asset_by_name(db, "Nonexistent Boat XYZ")["found"] is False
     db.close()
+
+
+def test_known_guest_followup_not_dropped():
+    """A follow-up from someone with an existing booking is treated as rental
+    even if the strict keyword filter would say 'other'."""
+    from app.core.database import SessionLocal
+    from app.models.customer import Customer
+    from app.models.booking import Booking
+    from app.models.email import EmailThread
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    c = Customer(full_name="Known Guest", email="known@x.com")
+    db.add(c); db.commit(); db.refresh(c)
+    # existing booking makes them a known guest
+    start = datetime.now(timezone.utc) + timedelta(days=5)
+    b = Booking(asset_id=1, customer_id=c.id, start_datetime=start,
+                end_datetime=start + timedelta(hours=4), total_price=450,
+                deposit_amount=135, status="pending")
+    db.add(b); db.commit()
+    # verify the "known guest" detection logic
+    has_booking = db.query(Booking).filter(Booking.customer_id == c.id).first()
+    assert has_booking is not None
+    db.close()

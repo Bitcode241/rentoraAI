@@ -7,6 +7,7 @@ Respects settings.ai_auto_send and the agent's needs_human escalation.
 import re
 from sqlalchemy.orm import Session
 from app.models.email import EmailThread, EmailMessage
+from app.models.booking import Booking
 from app.services import conversation_service
 from app.integrations.email_service import email_service
 from app.ai.agent import run_agent
@@ -248,9 +249,21 @@ def process_unread(db: Session, max_results: int = 10) -> list:
         # completely untouched for the owner — no reply, no wasted AI call.
         is_system = _is_system_sender(sender_email, em.get("subject", ""))
         is_rental = intent in RENTAL_INTENTS
-        if is_system or not is_rental:
+
+        # If this sender already has a conversation/booking with us, treat their
+        # follow-up as part of that rental conversation even if the strict keyword
+        # filter says "other" (e.g. short replies like "yes, book it" or
+        # "can I get that one?"). This prevents dropping genuine follow-ups.
+        is_known_guest = False
+        if not is_system:
+            existing_thread = db.query(EmailThread).filter(
+                EmailThread.customer_id == customer.id).first()
+            existing_booking = db.query(Booking).filter(
+                Booking.customer_id == customer.id).first()
+            is_known_guest = bool(existing_thread or existing_booking)
+
+        if is_system or (not is_rental and not is_known_guest):
             if is_system and use_manager:
-                # clear daemon/bounce noise so it doesn't pile up
                 mailbox_manager.mark_read(mailbox, em.get("id", ""))
             log.info("email_ignored", mailbox=mailbox, intent=intent,
                      is_system=is_system, sender=sender_email)
@@ -259,6 +272,10 @@ def process_unread(db: Session, max_results: int = 10) -> list:
                               "reason": "system_sender" if is_system else "not_rental",
                               "auto_sent": False})
             continue
+        if not is_rental and is_known_guest:
+            # follow-up from someone we're already talking to — let the AI handle it
+            intent = "request"
+            log.info("email_followup_known_guest", sender=sender_email)
 
         if not thread:
             thread = EmailThread(gmail_thread_id=thread_key,
