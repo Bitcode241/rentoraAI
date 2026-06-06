@@ -392,3 +392,14 @@ def test_send_deposit_link_tool():
     # stripe not configured in tests -> clean checkout_failed, not a crash
     assert "error" in res or res.get("status") == "awaiting_payment"
     db.close()
+
+
+def test_resolve_asset_by_name():
+    from app.core.database import SessionLocal
+    from app.ai.tools import find_asset_by_name
+    db = SessionLocal()
+    for variant in ("Atlantic Marine 750", "atlantic 750", "4k marine", "Gaia"):
+        r = find_asset_by_name(db, variant)
+        assert r["found"] is True
+    assert find_asset_by_name(db, "Nonexistent Boat XYZ")["found"] is False
+    db.close()

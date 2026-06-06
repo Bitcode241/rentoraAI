@@ -13,6 +13,44 @@ def _parse(dt: str) -> datetime:
     return dtparser.parse(dt)
 
 
+def _resolve_asset(db, asset_id=None, asset_name=""):
+    """Find an asset by id OR by (fuzzy) name. Returns the Asset or None.
+    Lets the AI work with the boat NAME the guest used, never needing an id."""
+    from app.models.asset import Asset
+    if asset_id:
+        a = db.get(Asset, asset_id)
+        if a:
+            return a
+    if asset_name:
+        name = asset_name.strip().lower()
+        assets = db.query(Asset).filter(Asset.active.is_(True)).all()
+        # exact (case-insensitive) first
+        for a in assets:
+            if a.name.lower() == name:
+                return a
+        # then "contains" either direction (handles "Atlantic 750" vs "Atlantic Marine 750")
+        for a in assets:
+            an = a.name.lower()
+            if name in an or an in name:
+                return a
+        # then loose: all significant words of the query appear in the name
+        words = [w for w in name.replace("-", " ").split() if len(w) > 1]
+        for a in assets:
+            an = a.name.lower()
+            if words and all(w in an for w in words):
+                return a
+    return None
+
+
+def find_asset_by_name(db: Session, name: str):
+    """Look up one of our assets by name. Returns id/name/type or not_found."""
+    a = _resolve_asset(db, asset_name=name)
+    if not a:
+        return {"found": False, "message": f"No asset matching '{name}'."}
+    return {"found": True, "asset_id": a.id, "name": a.name,
+            "asset_type": a.asset_type, "is_external": bool(getattr(a, "is_external", False))}
+
+
 def _serialize_assets(results, dedupe=False):
     out = []
     for r in results:
@@ -111,27 +149,30 @@ def create_booking(db: Session, asset_id: int, customer_id: int, start: str, end
             "total_price": b.total_price, "deposit": b.deposit_amount}
 
 
-def send_deposit_link(db: Session, asset_id: int, customer_id: int, start: str,
-                      end: str, package_id: int = None, guest_mailbox: str = ""):
+def send_deposit_link(db: Session, customer_id: int, start: str,
+                      end: str, asset_id: int = None, asset_name: str = "",
+                      package_id: int = None, guest_mailbox: str = ""):
     """Create a pending booking and email the guest a Stripe deposit link.
-    The booking is NOT confirmed until the deposit is actually paid (the Stripe
-    webhook confirms it). Use this for OUR OWN boats/jetskis when a slot is free."""
-    from app.models.asset import Asset
+    Accepts either asset_id OR asset_name (the boat name the guest used).
+    The booking is NOT confirmed until the deposit is actually paid."""
     from app.models.customer import Customer
     from app.services import payment_service
     from app.integrations.email_imap import MultiMailboxManager
-    asset = db.get(Asset, asset_id)
-    if asset and getattr(asset, "is_external", False):
+    asset = _resolve_asset(db, asset_id=asset_id, asset_name=asset_name)
+    if not asset:
+        return {"error": "asset_not_found",
+                "message": f"Could not find a boat matching '{asset_name or asset_id}'."}
+    if getattr(asset, "is_external", False):
         return {"error": "external_asset",
                 "message": "External boat — use request_external_availability."}
     # create the booking; it stays pending until paid
-    b = booking_service.create_booking(db, asset_id, customer_id,
+    b = booking_service.create_booking(db, asset.id, customer_id,
                                         _parse(start), _parse(end),
                                         source="ai", actor="ai-agent",
                                         package_id=package_id)
     cust = db.get(Customer, customer_id)
     res = payment_service.create_deposit_checkout(
-        b, asset.name if asset else "Plovilo", cust.email if cust else "")
+        b, asset.name, cust.email if cust else "")
     if "url" not in res:
         return {"error": "checkout_failed", "message": res.get("message", "")}
     b.stripe_session_id = res["session_id"]
@@ -150,21 +191,23 @@ def send_deposit_link(db: Session, asset_id: int, customer_id: int, start: str,
             "message": "Deposit link sent to the guest. Booking confirms after payment."}
 
 
-def request_external_availability(db: Session, asset_id: int, customer_id: int,
+def request_external_availability(db: Session, customer_id: int,
                                   start: str, end: str, passengers: int,
-                                  price: float, package_id: int = None,
+                                  price: float, asset_id: int = None,
+                                  asset_name: str = "", package_id: int = None,
                                   guest_mailbox: str = ""):
     """For an EXTERNAL (partner) boat: ask the owner if it's free. Does NOT book.
-    The owner is emailed; when they reply DA, the booking is created automatically.
-    Tell the guest you're checking availability and will get back to them."""
+    Accepts asset_id OR asset_name. The owner is emailed; when they reply DA, the
+    booking is created automatically. Tell the guest you're checking availability."""
     from app.services import external_service
     from app.integrations.email_imap import MultiMailboxManager
     from app.models.asset import Asset
     from app.models.customer import Customer
-    asset = db.get(Asset, asset_id)
+    asset = _resolve_asset(db, asset_id=asset_id, asset_name=asset_name)
     customer = db.get(Customer, customer_id)
     if not asset or not asset.is_external:
-        return {"error": "not_external", "message": "Asset is not an external boat."}
+        return {"error": "not_external",
+                "message": f"'{asset_name or asset_id}' is not a known external boat."}
     req = external_service.create_request(
         db, asset, customer, start=_parse(start), end=_parse(end),
         passengers=passengers, price=price, guest_mailbox=guest_mailbox)
@@ -269,18 +312,27 @@ TOOL_SCHEMAS = [
             "required": ["asset_id", "customer_id", "start", "end"]}}},
     {"type": "function", "function": {
         "name": "send_deposit_link",
-        "description": "For OUR OWN boats/jetskis (is_external=false): when a slot is "
-                       "free and the guest wants to book, create a pending booking and "
-                       "email the guest a Stripe deposit payment link. The booking is "
-                       "NOT confirmed until the deposit is paid. Use this instead of "
-                       "create_booking for online/email/whatsapp guests so they pay the "
-                       "deposit to confirm. Tell the guest a payment link has been sent.",
+        "description": "For OUR OWN boats/jetskis: when a slot is free and the guest "
+                       "wants to book, create a pending booking and email the guest a "
+                       "Stripe deposit link. Pass asset_name (the boat name the guest "
+                       "used) OR asset_id — you do NOT need to ask the guest for an ID, "
+                       "the system resolves the boat by name. The booking confirms after "
+                       "the deposit is paid. Tell the guest a payment link has been sent.",
         "parameters": {"type": "object", "properties": {
-            "asset_id": {"type": "integer"}, "customer_id": {"type": "integer"},
+            "customer_id": {"type": "integer"},
+            "asset_name": {"type": "string", "description": "Boat name the guest used"},
+            "asset_id": {"type": "integer"},
             "start": {"type": "string"}, "end": {"type": "string"},
             "package_id": {"type": "integer", "description": "Chosen price package id"},
             "guest_mailbox": {"type": "string", "description": "Address the guest wrote to"}},
-            "required": ["asset_id", "customer_id", "start", "end"]}}},
+            "required": ["customer_id", "start", "end"]}}},
+    {"type": "function", "function": {
+        "name": "find_asset_by_name",
+        "description": "Resolve a boat/jetski NAME to its system id. Use when the guest "
+                       "names a specific boat so you can act on it. Never ask the guest "
+                       "for an asset ID — use this instead.",
+        "parameters": {"type": "object", "properties": {
+            "name": {"type": "string"}}, "required": ["name"]}}},
     {"type": "function", "function": {
         "name": "request_external_availability",
         "description": "For an EXTERNAL/partner boat (is_external=true in availability "
@@ -289,13 +341,14 @@ TOOL_SCHEMAS = [
                        "checking availability and will confirm shortly. Never reveal to "
                        "the guest that the boat belongs to someone else.",
         "parameters": {"type": "object", "properties": {
+            "asset_name": {"type": "string", "description": "Boat name the guest used"},
             "asset_id": {"type": "integer"}, "customer_id": {"type": "integer"},
             "start": {"type": "string"}, "end": {"type": "string"},
             "passengers": {"type": "integer"},
             "price": {"type": "number", "description": "Quoted package price"},
             "package_id": {"type": "integer"},
             "guest_mailbox": {"type": "string", "description": "Address the guest wrote to"}},
-            "required": ["asset_id", "customer_id", "start", "end", "passengers", "price"]}}},
+            "required": ["customer_id", "start", "end", "passengers", "price"]}}},
     {"type": "function", "function": {
         "name": "cancel_booking",
         "description": "Cancel a booking by id.",
@@ -343,6 +396,7 @@ TOOL_FUNCS = {
     "create_booking": create_booking,
     "request_external_availability": request_external_availability,
     "send_deposit_link": send_deposit_link,
+    "find_asset_by_name": find_asset_by_name,
     "cancel_booking": cancel_booking,
     "get_customer_history": get_customer_history,
     "list_transfer_zones": list_transfer_zones,
