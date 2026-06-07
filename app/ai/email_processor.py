@@ -253,8 +253,14 @@ def _process_unread_inner(db: Session, max_results: int = 10) -> list:
             processed.append(handled)
             continue
 
+        sender_name = em.get("from_name") or ""
         customer = conversation_service.find_or_create_customer(
-            db, email=sender_email, full_name=sender_email)
+            db, email=sender_email, full_name=sender_name or sender_email)
+        # If we learned a real display name and the stored one is still the email,
+        # upgrade it so confirmations show a proper name.
+        if sender_name and customer.full_name in ("", sender_email):
+            customer.full_name = sender_name
+            db.commit()
 
         thread_key = em.get("thread_id") or em.get("id")
         thread = db.query(EmailThread).filter(

@@ -95,6 +95,7 @@ class ImapSmtpEmailService:
                     "thread_id": msg.get("Message-ID", "") or "",
                     "from": msg.get("From", ""),
                     "from_email": from_addr,
+                    "from_name": from_name or "",
                     "to": msg.get("To", ""),
                     "subject": _decode(msg.get("Subject", "")),
                     "body": _extract_body(msg),

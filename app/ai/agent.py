@@ -204,7 +204,9 @@ def run_agent(db: Session, message: str, language: str = "en",
 
 
 def _deposit_reply(language: str, r: dict) -> str:
-    """Build a clean confirmation+link reply if the AI didn't write one itself."""
+    """Build a clean confirmation+link reply if the AI didn't write one itself.
+    Always includes a transfer up-sell offer and asks for a contact phone, so these
+    happen reliably (in code) even when the model skips them."""
     asset = r.get("asset", "")
     deposit = r.get("deposit_amount", 0)
     total = r.get("total_price", 0)
@@ -215,17 +217,31 @@ def _deposit_reply(language: str, r: dict) -> str:
                 f"molimo uplatu depozita od {deposit:.2f} EUR (ukupna cijena "
                 f"{total:.2f} EUR, ostatak na licu mjesta).\n\n"
                 f"Sigurna poveznica za uplatu:\n{url}\n\n"
-                f"Rezervacija se potvrđuje automatski nakon uplate. Hvala!")
+                f"Rezervacija se potvrđuje automatski nakon uplate.\n\n"
+                f"Trebate li prijevoz do plovila (dolazak i/ili odlazak)? Možemo "
+                f"organizirati transfer uz doplatu ovisno o lokaciji gdje odsjedate — "
+                f"javite nam adresu pa šaljemo cijenu. Molimo i Vaš broj telefona "
+                f"kako bi se naš skiper mogao dogovoriti oko točnog mjesta i vremena "
+                f"polaska. Hvala!")
     if lang == "de":
         return (f"Hallo,\n\nIhre Buchung für {asset} ist bereit. Zur Bestätigung "
                 f"zahlen Sie bitte die Anzahlung von {deposit:.2f} EUR (Gesamtpreis "
                 f"{total:.2f} EUR, Rest vor Ort).\n\n"
                 f"Sicherer Zahlungslink:\n{url}\n\n"
-                f"Die Buchung wird nach Zahlung automatisch bestätigt. Danke!")
+                f"Die Buchung wird nach Zahlung automatisch bestätigt.\n\n"
+                f"Benötigen Sie einen Transfer zum Boot (Hin- und/oder Rückfahrt)? "
+                f"Gegen Aufpreis je nach Unterkunft möglich — senden Sie uns Ihre "
+                f"Adresse für den Preis. Bitte teilen Sie uns auch Ihre Telefonnummer "
+                f"mit, damit unser Skipper Treffpunkt und Zeit abstimmen kann. Danke!")
     return (f"Hello,\n\nYour booking for {asset} is ready. To confirm, please pay the "
             f"deposit of {deposit:.2f} EUR (total {total:.2f} EUR, balance on site).\n\n"
             f"Secure payment link:\n{url}\n\n"
-            f"The booking confirms automatically once the deposit is paid. Thank you!")
+            f"The booking confirms automatically once the deposit is paid.\n\n"
+            f"Would you like a transfer to the boat (pick-up and/or drop-off)? We can "
+            f"arrange it for an extra fee depending on where you're staying — send us "
+            f"your address and we'll share the price. Please also share your phone "
+            f"number so our skipper can coordinate the exact meeting point and time. "
+            f"Thank you!")
 
 
 def _fallback(db: Session, message: str, language: str, customer_id):
