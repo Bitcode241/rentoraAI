@@ -426,3 +426,27 @@ def test_known_guest_followup_not_dropped():
     has_booking = db.query(Booking).filter(Booking.customer_id == c.id).first()
     assert has_booking is not None
     db.close()
+
+
+def test_auto_deposit_detection():
+    """Code-driven deposit: detects intent, date, passengers, boat from text."""
+    from app.services import auto_deposit_service as ad
+    convo = "zanima me Gaia 670 za 25.07.2026 cijeli dan 6 osoba, želim platiti depozit"
+    assert ad.has_pay_intent(convo) is True
+    assert ad.has_pay_intent("samo me zanima cijena") is False
+    d = ad._parse_date(convo)
+    assert d is not None and d.month == 7 and d.day == 25
+    assert ad._parse_passengers(convo) == 6
+    assert ad._is_full_day(convo) is True
+
+
+def test_auto_deposit_resolves_boat_and_package():
+    from app.core.database import SessionLocal
+    from app.services import auto_deposit_service as ad
+    from app.models.asset import Asset
+    db = SessionLocal()
+    asset = db.query(Asset).filter(Asset.name == "Gaia 670").first()
+    if asset:
+        pid, pkg = ad._pick_package(asset, full_day=True)
+        assert pkg is not None and pkg["duration_minutes"] == 480
+    db.close()

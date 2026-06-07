@@ -313,6 +313,32 @@ def _process_unread_inner(db: Session, max_results: int = 10) -> list:
         result = run_agent(db, em.get("body", ""), language=customer.language,
                            customer_id=customer.id)
 
+        # CODE TAKES OVER THE MONEY STEP: if the guest expressed payment intent and
+        # we can resolve boat + date from the conversation, create the deposit link
+        # in code (reliable), regardless of whether the AI managed to do it.
+        try:
+            from app.services import auto_deposit_service
+            from app.ai.agent import _deposit_reply
+            convo = "\n".join(
+                m.body for m in conversation_service.history(db, customer.id, limit=20))
+            dep = auto_deposit_service.try_auto_deposit(
+                db, conversation_text=convo, latest_message=em.get("body", ""),
+                customer_id=customer.id, guest_mailbox=mailbox)
+            if dep and dep.get("payment_url"):
+                # Use the AI's text if it wrote one, otherwise a clean built reply,
+                # and make sure the link is present in the outgoing message.
+                base = result.get("reply") or ""
+                if dep["payment_url"] not in base:
+                    base = _deposit_reply(customer.language, dep)
+                result = {"reply": base, "needs_human": False,
+                          "actions": result.get("actions", [])}
+                log.info("auto_deposit_sent", customer_id=customer.id,
+                         booking_id=dep.get("booking_id"))
+            elif dep and dep.get("error") == "not_available":
+                log.info("auto_deposit_not_available", asset=dep.get("asset"))
+        except Exception as e:
+            log.warning("auto_deposit_failed", error=str(e))
+
         auto = settings.ai_auto_send and not result["needs_human"] and result["reply"]
         if auto:
             subject = f"Re: {em.get('subject', '')}"
