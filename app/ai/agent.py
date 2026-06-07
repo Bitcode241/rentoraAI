@@ -110,7 +110,7 @@ def _client():
 
 
 def run_agent(db: Session, message: str, language: str = "en",
-              customer_id: int | None = None, max_steps: int = 6) -> dict:
+              customer_id: int | None = None, max_steps: int = 8) -> dict:
     client = _client()
     if client is None:
         return _fallback(db, message, language, customer_id)
@@ -165,10 +165,29 @@ def run_agent(db: Session, message: str, language: str = "en",
             history.append({"role": "tool", "tool_call_id": tc.id,
                             "content": json.dumps(result, default=str)})
 
-    # Loop ended without a final text reply. If we successfully created a deposit
-    # link during this run, GUARANTEE the guest still gets it — build the reply
-    # ourselves from the tool result (so a missing AI closing message never means
-    # the link is lost). This makes the last mile reliable.
+    # Loop ended without the AI writing a final text reply (it kept calling tools
+    # until max_steps). Force ONE last call with tools DISABLED so the model MUST
+    # produce a text answer to the guest. This guarantees a reply every time.
+    try:
+        history.append({"role": "system",
+                        "content": "Now write your final reply to the guest in their "
+                                    "language, using the tool results above. If a deposit "
+                                    "payment link (payment_url) was created, include it as "
+                                    "a clickable link and state the deposit amount. Do not "
+                                    "call any tools — just write the message."})
+        final = client.chat.completions.create(
+            model=settings.openai_model, messages=history, temperature=0.2)
+        reply = (final.choices[0].message.content or "").strip()
+        escalate = "[[ESCALATE]]" in reply
+        reply = reply.replace("[[ESCALATE]]", "").strip()
+        if reply:
+            return {"reply": reply, "needs_human": needs_human or escalate,
+                    "actions": actions}
+    except Exception as e:
+        log.warning("final_reply_failed", error=str(e))
+
+    # Last-resort safety net: if we created a deposit link, build the reply in code
+    # so the guest always gets it even if the model produced nothing.
     for act in reversed(actions):
         if act["tool"] == "send_deposit_link":
             r = act["result"]
