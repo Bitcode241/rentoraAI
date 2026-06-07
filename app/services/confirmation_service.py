@@ -19,11 +19,14 @@ T = {
         "date": "Datum i vrijeme",
         "guests": "Broj osoba",
         "phone": "Kontakt telefon",
+        "guest_name": "Gost",
+        "guest_email": "Email gosta",
         "package": "Paket",
         "deposit_paid": "Plaćeni depozit",
         "full_price": "Ukupna cijena",
         "balance": "Za platiti na licu mjesta",
         "transfer_inc": "Transfer uključen",
+        "paid_badge": "PLAĆENO",
         "yes": "Da", "no": "Ne",
         "location": "Lokacija polaska",
         "thanks": "Hvala na rezervaciji! Veselimo se Vašem dolasku.",
@@ -38,11 +41,14 @@ T = {
         "date": "Date & time",
         "guests": "Guests",
         "phone": "Contact phone",
+        "guest_name": "Guest",
+        "guest_email": "Guest email",
         "package": "Package",
         "deposit_paid": "Deposit paid",
         "full_price": "Total price",
         "balance": "Balance due on site",
         "transfer_inc": "Transfer included",
+        "paid_badge": "PAID",
         "yes": "Yes", "no": "No",
         "location": "Departure location",
         "thanks": "Thank you for your booking! We look forward to seeing you.",
@@ -57,11 +63,14 @@ T = {
         "date": "Datum & Uhrzeit",
         "guests": "Personen",
         "phone": "Telefon",
+        "guest_name": "Gast",
+        "guest_email": "Gast E-Mail",
         "package": "Paket",
         "deposit_paid": "Angezahlt",
         "full_price": "Gesamtpreis",
         "balance": "Restzahlung vor Ort",
         "transfer_inc": "Transfer inklusive",
+        "paid_badge": "BEZAHLT",
         "yes": "Ja", "no": "Nein",
         "location": "Abfahrtsort",
         "thanks": "Vielen Dank für Ihre Buchung! Wir freuen uns auf Sie.",
@@ -76,14 +85,45 @@ def _t(lang: str) -> dict:
     return T.get((lang or "en").lower()[:2], T["en"])
 
 
+_FONTS_READY = None
+
+def _register_fonts():
+    """Register DejaVu (Unicode) fonts if available; return (regular, bold) names.
+    Falls back to Helvetica if the TTFs aren't present (no crash)."""
+    global _FONTS_READY
+    if _FONTS_READY is not None:
+        return _FONTS_READY
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        import os
+        base = "/usr/share/fonts/truetype/dejavu"
+        reg = os.path.join(base, "DejaVuSans.ttf")
+        bold = os.path.join(base, "DejaVuSans-Bold.ttf")
+        if os.path.exists(reg) and os.path.exists(bold):
+            pdfmetrics.registerFont(TTFont("DejaVu", reg))
+            pdfmetrics.registerFont(TTFont("DejaVu-Bold", bold))
+            _FONTS_READY = ("DejaVu", "DejaVu-Bold")
+            return _FONTS_READY
+    except Exception:
+        pass
+    _FONTS_READY = ("Helvetica", "Helvetica-Bold")
+    return _FONTS_READY
+
+
 def build_pdf(*, lang, business_name, booking_id, asset_name, when, guests,
               package, deposit_paid, full_price, balance, transfer_included,
-              location, phone="", currency="EUR") -> bytes:
-    """Return a PDF receipt as bytes."""
+              location, phone="", guest_name="", guest_email="",
+              transfer_note="", currency="EUR") -> bytes:
+    """Return a polished, professional PDF confirmation as bytes."""
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.lib import colors
     from reportlab.pdfgen import canvas
+
+    # Use a Unicode font so Croatian/German characters (č, ć, ž, š, đ, ü) render.
+    font_reg, font_bold = _register_fonts()
+    font_obl = font_reg  # oblique optional; fall back to regular
 
     tr = _t(lang)
     buf = io.BytesIO()
@@ -91,19 +131,43 @@ def build_pdf(*, lang, business_name, booking_id, asset_name, when, guests,
     w, h = A4
 
     teal = colors.HexColor("#0f6a7d")
+    teal_dark = colors.HexColor("#0a4d5c")
+    gold = colors.HexColor("#c8a45c")
     ink = colors.HexColor("#0d2b32")
+    grey = colors.HexColor("#5a6b6f")
+    light = colors.HexColor("#eef3f3")
+    line_col = colors.HexColor("#dfe6e6")
 
-    # header band
+    # ---- header band with gradient-like layering ----
+    c.setFillColor(teal_dark)
+    c.rect(0, h - 46 * mm, w, 46 * mm, fill=1, stroke=0)
     c.setFillColor(teal)
-    c.rect(0, h - 40 * mm, w, 40 * mm, fill=1, stroke=0)
-    c.setFillColor(colors.white)
-    c.setFont("Helvetica-Bold", 22)
-    c.drawString(20 * mm, h - 22 * mm, business_name or "Rentora")
-    c.setFont("Helvetica", 13)
-    c.drawString(20 * mm, h - 31 * mm, tr["title"])
+    c.rect(0, h - 46 * mm, w, 42 * mm, fill=1, stroke=0)
+    # thin gold accent line under header
+    c.setFillColor(gold)
+    c.rect(0, h - 47 * mm, w, 1.2 * mm, fill=1, stroke=0)
 
-    # body rows
-    y = h - 58 * mm
+    c.setFillColor(colors.white)
+    c.setFont(font_bold, 24)
+    c.drawString(20 * mm, h - 22 * mm, business_name or "Rentora")
+    c.setFont(font_reg, 12)
+    c.drawString(20 * mm, h - 30 * mm, tr["title"])
+    # small system tag, top-right
+    c.setFont(font_obl, 8.5)
+    c.setFillColor(colors.HexColor("#bfe0e6"))
+    c.drawRightString(w - 20 * mm, h - 14 * mm, "Powered by Rentora AI Rental System")
+
+    # ---- PAID badge ----
+    badge_w, badge_h = 38 * mm, 12 * mm
+    bx, by = w - 20 * mm - badge_w, h - 38 * mm
+    c.setFillColor(gold)
+    c.roundRect(bx, by, badge_w, badge_h, 2 * mm, fill=1, stroke=0)
+    c.setFillColor(teal_dark)
+    c.setFont(font_bold, 12)
+    c.drawCentredString(bx + badge_w / 2, by + 4 * mm, tr["paid_badge"])
+
+    # ---- details card ----
+    y = h - 64 * mm
     rows = [
         (tr["booking_no"], f"#{booking_id}"),
         (tr["vessel"], asset_name),
@@ -112,49 +176,66 @@ def build_pdf(*, lang, business_name, booking_id, asset_name, when, guests,
     ]
     if package:
         rows.append((tr["package"], package))
-    rows += [
-        (tr["transfer_inc"], tr["yes"] if transfer_included else tr["no"]),
-    ]
+    # Transfer row ONLY when a transfer is actually part of the booking.
+    if transfer_included:
+        rows.append((tr["transfer_inc"], transfer_note or tr["yes"]))
     if location:
         rows.append((tr["location"], location))
+    # Guest contact details — so the skipper can reach them on the day.
+    if guest_name:
+        rows.append((tr["guest_name"], guest_name))
     if phone:
         rows.append((tr["phone"], phone))
+    if guest_email:
+        rows.append((tr["guest_email"], guest_email))
 
-    c.setFillColor(ink)
+    card_top = y + 8 * mm
+    card_h = len(rows) * 11 * mm + 6 * mm
+    c.setFillColor(light)
+    c.roundRect(18 * mm, card_top - card_h, w - 36 * mm, card_h, 3 * mm, fill=1, stroke=0)
+
     for label, value in rows:
-        c.setFont("Helvetica", 11)
-        c.setFillColor(colors.HexColor("#5a6b6f"))
-        c.drawString(20 * mm, y, label)
+        c.setFont(font_reg, 10.5)
+        c.setFillColor(grey)
+        c.drawString(24 * mm, y, label.upper())
         c.setFillColor(ink)
-        c.setFont("Helvetica-Bold", 12)
-        c.drawString(80 * mm, y, str(value))
+        c.setFont(font_bold, 12)
+        c.drawString(82 * mm, y, str(value))
         y -= 11 * mm
 
-    # money box
-    y -= 6 * mm
-    c.setStrokeColor(colors.HexColor("#dfe6e6"))
-    c.line(20 * mm, y, w - 20 * mm, y)
-    y -= 12 * mm
+    # ---- money box ----
+    y -= 10 * mm
+    c.setFillColor(teal)
+    c.roundRect(18 * mm, y - 34 * mm, w - 36 * mm, 38 * mm, 3 * mm, fill=1, stroke=0)
+    my = y
     money = [
-        (tr["full_price"], f"{full_price:.2f} {currency}"),
-        (tr["deposit_paid"], f"-{deposit_paid:.2f} {currency}"),
-        (tr["balance"], f"{balance:.2f} {currency}"),
+        (tr["full_price"], f"{full_price:.2f} {currency}", False),
+        (tr["deposit_paid"], f"- {deposit_paid:.2f} {currency}", False),
+        (tr["balance"], f"{balance:.2f} {currency}", True),
     ]
-    for i, (label, value) in enumerate(money):
-        bold = (i == len(money) - 1)
-        c.setFont("Helvetica-Bold" if bold else "Helvetica", 13 if bold else 11)
-        c.setFillColor(ink if bold else colors.HexColor("#5a6b6f"))
-        c.drawString(20 * mm, y, label)
-        c.drawRightString(w - 20 * mm, y, value)
-        y -= 10 * mm
+    my -= 4 * mm
+    for label, value, bold in money:
+        c.setFillColor(colors.white)
+        c.setFont(font_bold if bold else font_reg, 14 if bold else 11)
+        c.drawString(24 * mm, my, label)
+        c.drawRightString(w - 24 * mm, my, value)
+        if not bold:
+            my -= 9 * mm
+        else:
+            my -= 9 * mm
 
-    # footer
-    c.setFont("Helvetica", 11)
+    # ---- footer ----
     c.setFillColor(ink)
-    c.drawString(20 * mm, 30 * mm, tr["thanks"])
-    c.setFillColor(colors.HexColor("#5a6b6f"))
-    c.setFont("Helvetica", 9)
-    c.drawString(20 * mm, 22 * mm, tr["questions"])
+    c.setFont(font_bold, 11)
+    c.drawString(20 * mm, 34 * mm, tr["thanks"])
+    c.setFillColor(grey)
+    c.setFont(font_reg, 9)
+    c.drawString(20 * mm, 27 * mm, tr["questions"])
+    # bottom accent
+    c.setFillColor(gold)
+    c.rect(0, 0, w, 6 * mm, fill=1, stroke=0)
+    c.setFillColor(teal)
+    c.rect(0, 6 * mm, w, 1 * mm, fill=1, stroke=0)
 
     c.showPage()
     c.save()

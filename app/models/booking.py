@@ -26,6 +26,7 @@ class Booking(Base):
     stripe_session_id: Mapped[str] = mapped_column(String(255), default="")
     stripe_payment_intent: Mapped[str] = mapped_column(String(255), default="")
     reminder_sent: Mapped[bool] = mapped_column(Boolean, default=False)
+    transfer_note: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     asset = relationship("Asset")

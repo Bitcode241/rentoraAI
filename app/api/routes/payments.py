@@ -119,9 +119,12 @@ def _send_confirmation(db, booking):
         guests=getattr(booking, "passengers", None) or "—",
         package=booking.package_name or "",
         deposit_paid=booking.amount_paid or 0, full_price=booking.total_price or 0,
-        balance=balance, transfer_included=False,
+        balance=balance, transfer_included=bool(getattr(booking, "transfer_note", "")),
         location=asset.location if asset else "",
-        phone=cust.phone or "", currency="EUR")
+        phone=cust.phone or "", guest_name=cust.full_name or "",
+        guest_email=cust.email or "",
+        transfer_note=getattr(booking, "transfer_note", "") or "",
+        currency="EUR")
     subject, body = confirmation_service.email_text(lang, business)
     mgr = MultiMailboxManager.from_db(db)
     if mgr.enabled:
