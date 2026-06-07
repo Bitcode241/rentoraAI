@@ -189,20 +189,18 @@ def send_deposit_link(db: Session, customer_id: int, start: str,
     b.stripe_session_id = res["session_id"]
     b.payment_status = "awaiting_payment"
     db.commit()
-    # email the guest the link, from the mailbox they wrote to
-    mgr = MultiMailboxManager.from_db(db)
-    if mgr.enabled and cust and cust.email:
-        from_box = guest_mailbox or next(iter(mgr.services.keys()), "")
-        deposit = b.deposit_amount or 0
-        body = (f"Pozdrav,\n\nza potvrdu rezervacije ({asset.name}) molimo uplatu "
-                f"depozita od {deposit:.2f} EUR putem sigurne poveznice:\n\n"
-                f"{res['url']}\n\nRezervacija se potvrđuje nakon uplate. Hvala!")
-        mgr.reply_from(from_box, cust.email, "Potvrda rezervacije — depozit", body)
+    # IMPORTANT: do NOT send a separate email here. Return everything to the AI
+    # so it puts the link + details into its single reply (one clean email, no
+    # duplicate messages). This is the reliable, synchronized flow.
+    deposit = b.deposit_amount or 0
     return {"booking_id": b.id, "status": "awaiting_payment", "asset": asset.name,
+            "deposit_amount": round(deposit, 2), "total_price": round(b.total_price or 0, 2),
             "payment_url": res["url"],
-            "message": "Deposit link created and emailed. ALSO include the payment_url "
-                       "directly in your reply so the guest has it immediately. The "
-                       "booking confirms after payment."}
+            "instruction": "Write ONE reply to the guest confirming the boat and date, "
+                           "stating the deposit amount, and INCLUDING the payment_url as a "
+                           "clickable link. Tell them the booking confirms once the deposit "
+                           "is paid. Do not say you'll send a separate email — the link IS "
+                           "in this reply."}
 
 
 def request_external_availability(db: Session, customer_id: int,

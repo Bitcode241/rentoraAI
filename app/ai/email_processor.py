@@ -17,6 +17,12 @@ from app.core.logging import get_logger
 log = get_logger("email-processor")
 
 import re as _re
+import threading
+
+# Prevents the scheduler poll and a manual /api/emails/process call from
+# processing the same mail at the same time (which caused double-processing
+# and "lost" replies). Only one run executes at a time; the other skips.
+_processing_lock = threading.Lock()
 
 # A rental inquiry must mention one of OUR PRODUCTS. These are matched as whole
 # words (so "book" won't match "Facebook", "transfer" won't match generic emails
@@ -211,6 +217,17 @@ def _maybe_handle_owner_reply(db, sender_email, em, mailbox, manager):
 
 
 def process_unread(db: Session, max_results: int = 10) -> list:
+    # If another run is already in progress, skip — avoids double-processing.
+    if not _processing_lock.acquire(blocking=False):
+        log.info("email_processing_skipped_locked")
+        return []
+    try:
+        return _process_unread_inner(db, max_results)
+    finally:
+        _processing_lock.release()
+
+
+def _process_unread_inner(db: Session, max_results: int = 10) -> list:
     from app.integrations.email_imap import MultiMailboxManager
     mailbox_manager = MultiMailboxManager.from_db(db)
     processed = []

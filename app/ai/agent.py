@@ -165,8 +165,44 @@ def run_agent(db: Session, message: str, language: str = "en",
             history.append({"role": "tool", "tool_call_id": tc.id,
                             "content": json.dumps(result, default=str)})
 
+    # Loop ended without a final text reply. If we successfully created a deposit
+    # link during this run, GUARANTEE the guest still gets it — build the reply
+    # ourselves from the tool result (so a missing AI closing message never means
+    # the link is lost). This makes the last mile reliable.
+    for act in reversed(actions):
+        if act["tool"] == "send_deposit_link":
+            r = act["result"]
+            if isinstance(r, dict) and r.get("payment_url"):
+                reply = _deposit_reply(language, r)
+                return {"reply": reply, "needs_human": False, "actions": actions}
+            break
     return {"reply": "I need a moment — a colleague will follow up shortly.",
             "needs_human": True, "actions": actions}
+
+
+def _deposit_reply(language: str, r: dict) -> str:
+    """Build a clean confirmation+link reply if the AI didn't write one itself."""
+    asset = r.get("asset", "")
+    deposit = r.get("deposit_amount", 0)
+    total = r.get("total_price", 0)
+    url = r.get("payment_url", "")
+    lang = (language or "en").lower()[:2]
+    if lang == "hr":
+        return (f"Pozdrav,\n\nVaša rezervacija za {asset} je spremna. Za potvrdu "
+                f"molimo uplatu depozita od {deposit:.2f} EUR (ukupna cijena "
+                f"{total:.2f} EUR, ostatak na licu mjesta).\n\n"
+                f"Sigurna poveznica za uplatu:\n{url}\n\n"
+                f"Rezervacija se potvrđuje automatski nakon uplate. Hvala!")
+    if lang == "de":
+        return (f"Hallo,\n\nIhre Buchung für {asset} ist bereit. Zur Bestätigung "
+                f"zahlen Sie bitte die Anzahlung von {deposit:.2f} EUR (Gesamtpreis "
+                f"{total:.2f} EUR, Rest vor Ort).\n\n"
+                f"Sicherer Zahlungslink:\n{url}\n\n"
+                f"Die Buchung wird nach Zahlung automatisch bestätigt. Danke!")
+    return (f"Hello,\n\nYour booking for {asset} is ready. To confirm, please pay the "
+            f"deposit of {deposit:.2f} EUR (total {total:.2f} EUR, balance on site).\n\n"
+            f"Secure payment link:\n{url}\n\n"
+            f"The booking confirms automatically once the deposit is paid. Thank you!")
 
 
 def _fallback(db: Session, message: str, language: str, customer_id):
