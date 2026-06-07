@@ -76,13 +76,15 @@ class ImapSmtpEmailService:
             conn = imaplib.IMAP4_SSL(self.box["imap_host"], self.box["imap_port"])
             conn.login(self.box["username"], self.box["password"])
             conn.select("INBOX")
-            status, data = conn.search(None, "UNSEEN")
+            # Use UID search/fetch — UIDs are STABLE across connections, unlike
+            # sequence numbers (which shift and caused mails to be missed/mismarked).
+            status, data = conn.uid("search", None, "UNSEEN")
             if status != "OK":
                 conn.logout()
                 return []
             ids = data[0].split()
             for mid in ids[:max_results]:
-                status, msgdata = conn.fetch(mid, "(BODY.PEEK[])")
+                status, msgdata = conn.uid("fetch", mid, "(BODY.PEEK[])")
                 if status != "OK":
                     continue
                 raw = msgdata[0][1]
@@ -112,7 +114,7 @@ class ImapSmtpEmailService:
             conn = imaplib.IMAP4_SSL(self.box["imap_host"], self.box["imap_port"])
             conn.login(self.box["username"], self.box["password"])
             conn.select("INBOX")
-            conn.store(message_id, "+FLAGS", "\\Seen")
+            conn.uid("store", message_id, "+FLAGS", "\\Seen")
             conn.logout()
         except Exception as e:  # pragma: no cover
             log.warning("imap_mark_failed", error=str(e), mailbox=self.address)
