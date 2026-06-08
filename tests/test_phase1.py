@@ -450,3 +450,10 @@ def test_auto_deposit_resolves_boat_and_package():
         pid, pkg = ad._pick_package(asset, full_day=True)
         assert pkg is not None and pkg["duration_minutes"] == 480
     db.close()
+
+
+def test_own_address_normalization():
+    """Self-sent mail detection compares lowercased addresses."""
+    own = {"info@seagulldubrovnik.com"}
+    assert "INFO@seagulldubrovnik.com".lower() in own
+    assert "guest@gmail.com".lower() not in own

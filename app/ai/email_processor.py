@@ -234,13 +234,24 @@ def _process_unread_inner(db: Session, max_results: int = 10) -> list:
     if mailbox_manager.enabled:
         inbox = mailbox_manager.list_all_unread(max_per_box=max_results)
         use_manager = True
+        # Our own mailbox addresses — NEVER process mail that we ourselves sent,
+        # otherwise the AI replies to its own messages in an endless loop.
+        own_addresses = {a.lower() for a in mailbox_manager.services.keys()}
     else:
         inbox = email_service.list_unread(max_results=max_results)
         use_manager = False
+        own_addresses = set()
 
     for em in inbox:
         sender_email = em.get("from_email") or _extract_email(em.get("from", ""))
         mailbox = em.get("mailbox", "")   # which of our addresses received it
+
+        # Skip anything sent from one of our own addresses (self-sent / loops).
+        if sender_email and sender_email.lower() in own_addresses:
+            if use_manager:
+                mailbox_manager.mark_read(mailbox, em.get("id", ""))
+            log.info("email_skipped_self", sender=sender_email)
+            continue
 
         # --- EXTERNAL OWNER REPLY? (check before the rental filter) ---
         # If this sender is the owner of an external asset AND has a pending
