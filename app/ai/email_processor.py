@@ -368,6 +368,12 @@ def _process_unread_inner(db: Session, max_results: int = 10) -> list:
         result = run_agent(db, em.get("body", ""), language=customer.language,
                            customer_id=customer.id, facts=facts)
 
+        # If the code supplied availability facts, presenting them is a complete
+        # answer — don't let a stray escalation hold it back as a draft.
+        if facts and result.get("reply") and result.get("needs_human"):
+            log.info("availability_answer_autosent")
+            result["needs_human"] = False
+
         # CODE TAKES OVER THE MONEY STEP: scope the conversation text to THIS thread
         # so a different inquiry's boat/date never bleeds into this one.
         try:
