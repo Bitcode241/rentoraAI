@@ -14,6 +14,38 @@ def get_or_create_conversation(db: Session, customer_id: int) -> Conversation:
     return conv
 
 
+def create_conversation(db: Session, customer_id: int) -> Conversation:
+    """Always create a NEW conversation (used when a new email thread starts)."""
+    conv = Conversation(customer_id=customer_id)
+    db.add(conv)
+    db.commit()
+    db.refresh(conv)
+    return conv
+
+
+def add_message_to(db: Session, conversation_id: int, channel: str, direction: str,
+                   body: str, meta: str = "") -> Message:
+    """Add a message to a SPECIFIC conversation (scoped to one email thread)."""
+    conv = db.get(Conversation, conversation_id)
+    if conv:
+        conv.last_channel = channel
+    msg = Message(conversation_id=conversation_id, channel=channel,
+                  direction=direction, body=body, meta=meta)
+    db.add(msg)
+    db.commit()
+    db.refresh(msg)
+    return msg
+
+
+def history_for(db: Session, conversation_id: int, limit: int = 30):
+    """History for a SPECIFIC conversation only (one thread, not all the
+    customer's mail). Keeps separate inquiries from bleeding into each other."""
+    return (db.query(Message)
+            .filter(Message.conversation_id == conversation_id)
+            .order_by(Message.created_at.asc())
+            .limit(limit).all())
+
+
 def add_message(db: Session, customer_id: int, channel: str, direction: str,
                 body: str, meta: str = "") -> Message:
     conv = get_or_create_conversation(db, customer_id)

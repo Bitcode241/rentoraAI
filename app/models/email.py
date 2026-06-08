@@ -10,6 +10,7 @@ class EmailThread(Base):
     gmail_thread_id: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     subject: Mapped[str] = mapped_column(String(512), default="")
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=True, index=True)
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("conversations.id"), nullable=True, index=True)
     intent: Mapped[str] = mapped_column(String(32), default="")  # request|confirmation|cancellation|other
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

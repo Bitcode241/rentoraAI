@@ -273,9 +273,23 @@ def _process_unread_inner(db: Session, max_results: int = 10) -> list:
             customer.full_name = sender_name
             db.commit()
 
-        thread_key = em.get("thread_id") or em.get("id")
-        thread = db.query(EmailThread).filter(
-            EmailThread.gmail_thread_id == thread_key).first()
+        # --- THREAD RESOLUTION (judge same-thread vs new inquiry) ---
+        # A reply carries In-Reply-To/References pointing at an earlier message.
+        # A fresh inquiry has neither -> it's a NEW thread (even from the same
+        # address), so an agency booking for many clients gets separate threads.
+        refs = (em.get("in_reply_to", "") + " " + em.get("references", "")).strip()
+        thread = None
+        if refs:
+            ref_ids = re.findall(r"<[^>]+>", refs)
+            if ref_ids:
+                thread = (db.query(EmailThread)
+                          .join(EmailMessage, EmailMessage.thread_id == EmailThread.id)
+                          .filter(EmailMessage.gmail_message_id.in_(ref_ids))
+                          .first())
+                if not thread:
+                    thread = (db.query(EmailThread)
+                              .filter(EmailThread.gmail_thread_id.in_(ref_ids))
+                              .first())
         intent = detect_intent(em.get("subject", "") + " " + em.get("body", ""))
 
         # SAFETY FILTER (before any AI call): reply ONLY to genuine rental
@@ -312,32 +326,41 @@ def _process_unread_inner(db: Session, max_results: int = 10) -> list:
             log.info("email_followup_known_guest", sender=sender_email)
 
         if not thread:
-            thread = EmailThread(gmail_thread_id=thread_key,
+            # brand-new inquiry -> its own thread AND its own conversation
+            conv = conversation_service.create_conversation(db, customer.id)
+            thread = EmailThread(gmail_thread_id=em.get("message_id") or em.get("id"),
                                  subject=em.get("subject", ""),
-                                 customer_id=customer.id, intent=intent)
+                                 customer_id=customer.id, intent=intent,
+                                 conversation_id=conv.id)
             db.add(thread)
             db.commit()
             db.refresh(thread)
+        conv_id = thread.conversation_id
+        if not conv_id:
+            # legacy thread without a conversation yet — attach one
+            conv = conversation_service.create_conversation(db, customer.id)
+            thread.conversation_id = conv.id
+            db.commit()
+            conv_id = conv.id
 
-        db.add(EmailMessage(thread_id=thread.id, gmail_message_id=em.get("id", ""),
+        db.add(EmailMessage(thread_id=thread.id, gmail_message_id=em.get("message_id") or em.get("id", ""),
                             sender=em.get("from", ""), recipient=em.get("to", ""),
                             subject=em.get("subject", ""), body=em.get("body", ""),
                             direction="inbound"))
         db.commit()
-        conversation_service.add_message(db, customer.id, "email", "inbound",
-                                         em.get("body", ""))
+        conversation_service.add_message_to(db, conv_id, "email", "inbound",
+                                            em.get("body", ""))
 
         result = run_agent(db, em.get("body", ""), language=customer.language,
                            customer_id=customer.id)
 
-        # CODE TAKES OVER THE MONEY STEP: if the guest expressed payment intent and
-        # we can resolve boat + date from the conversation, create the deposit link
-        # in code (reliable), regardless of whether the AI managed to do it.
+        # CODE TAKES OVER THE MONEY STEP: scope the conversation text to THIS thread
+        # so a different inquiry's boat/date never bleeds into this one.
         try:
             from app.services import auto_deposit_service
             from app.ai.agent import _deposit_reply
             convo = "\n".join(
-                m.body for m in conversation_service.history(db, customer.id, limit=20))
+                m.body for m in conversation_service.history_for(db, conv_id, limit=20))
             dep = auto_deposit_service.try_auto_deposit(
                 db, conversation_text=convo, latest_message=em.get("body", ""),
                 customer_id=customer.id, guest_mailbox=mailbox)
@@ -359,24 +382,31 @@ def _process_unread_inner(db: Session, max_results: int = 10) -> list:
         auto = settings.ai_auto_send and not result["needs_human"] and result["reply"]
         if auto:
             subject = f"Re: {em.get('subject', '')}"
+            reply_ref = em.get("message_id", "") or em.get("in_reply_to", "")
             if use_manager:
                 # reply FROM the address that received the message
                 mailbox_manager.reply_from(mailbox, sender_email, subject,
-                                           result["reply"], thread_id=em.get("in_reply_to", ""))
+                                           result["reply"], thread_id=reply_ref)
             else:
                 email_service.send(sender_email, subject, result["reply"],
-                                   thread_id=em.get("in_reply_to", ""))
-            conversation_service.add_message(db, customer.id, "email", "outbound",
-                                             result["reply"])
+                                   thread_id=reply_ref)
+            conversation_service.add_message_to(db, conv_id, "email", "outbound",
+                                                result["reply"])
+            db.add(EmailMessage(thread_id=thread.id, gmail_message_id="",
+                                sender=mailbox, recipient=sender_email,
+                                subject=subject, body=result["reply"],
+                                direction="outbound"))
             thread.intent = intent
             db.commit()
         else:
-            conv = conversation_service.get_or_create_conversation(db, customer.id)
-            conv.needs_human = True
-            db.commit()
+            from app.models.conversation import Conversation as _Conv
+            conv = db.get(_Conv, conv_id)
+            if conv:
+                conv.needs_human = True
+                db.commit()
             if result["reply"]:
-                conversation_service.add_message(
-                    db, customer.id, "email", "outbound",
+                conversation_service.add_message_to(
+                    db, conv_id, "email", "outbound",
                     "[DRAFT — awaiting human review] " + result["reply"])
 
         if use_manager:

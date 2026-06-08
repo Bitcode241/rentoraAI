@@ -92,6 +92,7 @@ class ImapSmtpEmailService:
                 from_name, from_addr = parseaddr(msg.get("From", ""))
                 out.append({
                     "id": mid.decode() if isinstance(mid, bytes) else str(mid),
+                    "message_id": msg.get("Message-ID", "") or "",
                     "thread_id": msg.get("Message-ID", "") or "",
                     "from": msg.get("From", ""),
                     "from_email": from_addr,
@@ -99,8 +100,8 @@ class ImapSmtpEmailService:
                     "to": msg.get("To", ""),
                     "subject": _decode(msg.get("Subject", "")),
                     "body": _extract_body(msg),
-                    "references": msg.get("References", ""),
-                    "in_reply_to": msg.get("Message-ID", ""),
+                    "references": msg.get("References", "") or "",
+                    "in_reply_to": msg.get("In-Reply-To", "") or "",
                     "mailbox": self.address,   # which of our addresses received it
                 })
             conn.logout()

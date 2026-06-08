@@ -457,3 +457,24 @@ def test_own_address_normalization():
     own = {"info@seagulldubrovnik.com"}
     assert "INFO@seagulldubrovnik.com".lower() in own
     assert "guest@gmail.com".lower() not in own
+
+
+def test_separate_conversations_per_thread():
+    """Two fresh inquiries (no In-Reply-To) from the same customer get separate
+    conversations, so an agency's multiple bookings don't bleed together."""
+    from app.core.database import SessionLocal
+    from app.services import conversation_service as cs
+    from app.models.customer import Customer
+    db = SessionLocal()
+    c = Customer(full_name="Agency", email="agency@x.com")
+    db.add(c); db.commit(); db.refresh(c)
+    conv1 = cs.create_conversation(db, c.id)
+    conv2 = cs.create_conversation(db, c.id)
+    assert conv1.id != conv2.id
+    cs.add_message_to(db, conv1.id, "email", "inbound", "Booking for client A")
+    cs.add_message_to(db, conv2.id, "email", "inbound", "Booking for client B")
+    h1 = cs.history_for(db, conv1.id)
+    h2 = cs.history_for(db, conv2.id)
+    assert len(h1) == 1 and len(h2) == 1
+    assert "client A" in h1[0].body and "client B" in h2[0].body
+    db.close()
