@@ -15,7 +15,8 @@ log = get_logger("booking")
 def create_booking(db: Session, asset_id: int, customer_id: int,
                    start: datetime, end: datetime, source: str = "admin",
                    notes: str = "", actor: str = "system",
-                   auto_confirm: bool = False, package_id: int = None) -> Booking:
+                   auto_confirm: bool = False, package_id: int = None,
+                   passengers: int = 0) -> Booking:
     if end <= start:
         raise HTTPException(400, "end_datetime must be after start_datetime")
 
@@ -56,7 +57,7 @@ def create_booking(db: Session, asset_id: int, customer_id: int,
         total_price=q["total_price"], deposit_amount=q["deposit_amount"],
         package_id=package_id, package_name=package_name,
         status="confirmed" if auto_confirm else "pending",
-        source=source, notes=notes,
+        source=source, notes=notes, passengers=passengers or 0,
     )
     db.add(booking)
     db.commit()

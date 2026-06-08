@@ -178,7 +178,8 @@ def create_booking(db: Session, asset_id: int, customer_id: int, start: str, end
 
 def send_deposit_link(db: Session, customer_id: int, start: str,
                       end: str, asset_id: int = None, asset_name: str = "",
-                      package_id: int = None, guest_mailbox: str = ""):
+                      package_id: int = None, guest_mailbox: str = "",
+                      passengers: int = 0):
     """Create a pending booking and email the guest a Stripe deposit link.
     Accepts either asset_id OR asset_name (the boat name the guest used).
     The booking is NOT confirmed until the deposit is actually paid."""
@@ -196,7 +197,7 @@ def send_deposit_link(db: Session, customer_id: int, start: str,
     b = booking_service.create_booking(db, asset.id, customer_id,
                                         _parse(start), _parse(end),
                                         source="ai", actor="ai-agent",
-                                        package_id=package_id)
+                                        package_id=package_id, passengers=passengers)
     cust = db.get(Customer, customer_id)
     res = payment_service.create_deposit_checkout(
         b, asset.name, cust.email if cust else "")
@@ -243,11 +244,19 @@ def request_external_availability(db: Session, customer_id: int,
     db.commit()
     # email the owner now
     mgr = MultiMailboxManager.from_db(db)
+    if not asset.owner_email:
+        log.warning("external_no_owner_email", asset=asset.name)
+        return {"status": "owner_asked", "request_id": req.id,
+                "message": "Owner email is MISSING for this boat — set owner_email in "
+                           "Admin > Assets so the partner can be notified. Tell the "
+                           "guest you're checking availability.",
+                "needs_human": True}
     if mgr.enabled and asset.owner_email:
         body = external_service.owner_email_body(req, asset)
         from_box = guest_mailbox or next(iter(mgr.services.keys()), "")
         mgr.reply_from(from_box, asset.owner_email,
                        f"Upit za plovilo {asset.name} (ref: {req.token})", body)
+        log.info("external_owner_emailed", asset=asset.name, owner=asset.owner_email)
     return {"status": "owner_asked", "request_id": req.id,
             "message": "Owner has been asked. Tell the guest you're checking "
                        "availability and will confirm shortly."}

@@ -496,3 +496,18 @@ def test_inquiry_boat_facts():
     block = iq.facts_to_prompt(f)
     assert "do not invent" in block.lower()
     db.close()
+
+
+def test_booking_stores_passengers():
+    from app.core.database import SessionLocal
+    from app.services import booking_service
+    from app.models.customer import Customer
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    c = Customer(full_name="Pax Test", email="pax@x.com")
+    db.add(c); db.commit(); db.refresh(c)
+    start = datetime.now(timezone.utc) + timedelta(days=12)
+    b = booking_service.create_booking(db, 1, c.id, start, start + timedelta(hours=4),
+                                       source="admin", passengers=6)
+    assert b.passengers == 6
+    db.close()

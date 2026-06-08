@@ -165,7 +165,8 @@ def try_auto_deposit(db: Session, conversation_text: str, latest_message: str,
     from app.ai import tools
     result = tools.send_deposit_link(
         db, customer_id=customer_id, start=start.isoformat(), end=end.isoformat(),
-        asset_id=asset.id, package_id=package_id, guest_mailbox=guest_mailbox)
+        asset_id=asset.id, package_id=package_id, guest_mailbox=guest_mailbox,
+        passengers=passengers)
     log.info("auto_deposit_attempt", asset=asset.name,
              ok=bool(result.get("payment_url")), error=result.get("error", ""))
     return result
