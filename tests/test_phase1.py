@@ -478,3 +478,21 @@ def test_separate_conversations_per_thread():
     assert len(h1) == 1 and len(h2) == 1
     assert "client A" in h1[0].body and "client B" in h2[0].body
     db.close()
+
+
+def test_inquiry_boat_facts():
+    """Code computes real available boats + prices for an inquiry (AI only phrases)."""
+    from app.core.database import SessionLocal
+    from app.services import inquiry_service as iq
+    db = SessionLocal()
+    txt = "renting a speed boat on 20.8.2026 4h for 6 people, anything available?"
+    assert iq.wants_boats(txt) is True
+    f = iq.build_boat_availability(db, txt)
+    assert f is not None and f["passengers"] == 6 and f["date"] == "20.08.2026"
+    assert f["any_available"] is True and len(f["options"]) > 0
+    # prices come from DB, not invented
+    prices = [o["price"] for o in f["options"]]
+    assert all(p and p > 0 for p in prices)
+    block = iq.facts_to_prompt(f)
+    assert "do not invent" in block.lower()
+    db.close()

@@ -119,13 +119,18 @@ def _client():
 
 
 def run_agent(db: Session, message: str, language: str = "en",
-              customer_id: int | None = None, max_steps: int = 8) -> dict:
+              customer_id: int | None = None, max_steps: int = 8,
+              facts: str = "") -> dict:
     client = _client()
     if client is None:
         return _fallback(db, message, language, customer_id)
 
     sys = SYSTEM_PROMPT.format(language=language, now=datetime.now(timezone.utc).isoformat())
     history = [{"role": "system", "content": sys}]
+    if facts:
+        # Code-computed facts (availability, prices). The AI MUST use these as the
+        # source of truth and may only rephrase tone — never change boats/prices.
+        history.append({"role": "system", "content": facts})
     if customer_id:
         history.append({"role": "system",
                         "content": f"The customer_id is {customer_id}."})

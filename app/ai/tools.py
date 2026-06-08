@@ -10,7 +10,23 @@ from app.integrations.whatsapp import whatsapp_service
 
 
 def _parse(dt: str) -> datetime:
-    return dtparser.parse(dt)
+    """Parse a datetime string robustly. The AI sometimes passes odd formats
+    (e.g. '2026-08-20 10am'); be forgiving and never crash the tool."""
+    from datetime import timezone
+    if isinstance(dt, datetime):
+        return dt
+    s = (dt or "").strip()
+    if not s:
+        raise ValueError("empty datetime")
+    try:
+        out = dtparser.parse(s, dayfirst=True, fuzzy=True)
+    except Exception:
+        # last resort: strip obvious noise and retry
+        cleaned = s.replace("pm", "").replace("am", "").replace("PM", "").replace("AM", "")
+        out = dtparser.parse(cleaned, dayfirst=True, fuzzy=True)
+    if out.tzinfo is None:
+        out = out.replace(tzinfo=timezone.utc)
+    return out
 
 
 def _resolve_asset(db, asset_id=None, asset_name=""):

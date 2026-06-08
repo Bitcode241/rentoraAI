@@ -351,8 +351,22 @@ def _process_unread_inner(db: Session, max_results: int = 10) -> list:
         conversation_service.add_message_to(db, conv_id, "email", "inbound",
                                             em.get("body", ""))
 
+        # CODE COMPUTES THE FACTS (availability + prices) so the AI can't invent
+        # boats or prices — it only phrases what the code found. Starts with boats.
+        facts = ""
+        try:
+            from app.services import inquiry_service
+            if inquiry_service.wants_boats(em.get("body", "")):
+                bf = inquiry_service.build_boat_availability(db, em.get("body", ""))
+                facts = inquiry_service.facts_to_prompt(bf)
+                if bf:
+                    log.info("boat_facts_computed", available=bf.get("any_available"),
+                             options=len(bf.get("options", [])))
+        except Exception as e:
+            log.warning("facts_failed", error=str(e))
+
         result = run_agent(db, em.get("body", ""), language=customer.language,
-                           customer_id=customer.id)
+                           customer_id=customer.id, facts=facts)
 
         # CODE TAKES OVER THE MONEY STEP: scope the conversation text to THIS thread
         # so a different inquiry's boat/date never bleeds into this one.
