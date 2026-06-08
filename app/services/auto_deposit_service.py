@@ -27,6 +27,8 @@ PAY_INTENT = [
     "pošalji link", "posalji link", "link za uplatu", "link za placanje",
     "pay deposit", "pay the deposit", "want to book", "like to book", "book it",
     "make a reservation", "want to pay", "send me the link", "payment link",
+    "please proceed", "proceed", "go ahead", "confirm it", "let's book",
+    "change it to", "change to", "switch to", "instead",
     "anzahlung", "buchen", "bezahlen", "reservieren",
 ]
 
@@ -122,18 +124,21 @@ def try_auto_deposit(db: Session, conversation_text: str, latest_message: str,
     if not has_pay_intent(latest_message) and not has_pay_intent(conversation_text):
         return None
 
-    # Resolve the boat by scanning the conversation for a known asset name.
+    # Resolve the boat. Prefer the boat named in the LATEST message (the guest may
+    # have just changed their choice); otherwise fall back to the conversation.
     from app.models.asset import Asset
-    text_l = conversation_text.lower()
-    asset = None
-    # match the longest asset name that appears in the conversation
     candidates = db.query(Asset).filter(Asset.active.is_(True)).all()
-    best = None
-    for a in candidates:
-        if a.name.lower() in text_l:
-            if best is None or len(a.name) > len(best.name):
-                best = a
-    asset = best
+
+    def _match(text):
+        t = (text or "").lower()
+        best = None
+        for a in candidates:
+            if a.name.lower() in t:
+                if best is None or len(a.name) > len(best.name):
+                    best = a
+        return best
+
+    asset = _match(latest_message) or _match(conversation_text)
     if not asset:
         return None  # can't safely pick a boat — let the AI keep talking
 

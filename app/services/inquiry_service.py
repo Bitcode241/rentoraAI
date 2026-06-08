@@ -100,12 +100,24 @@ def facts_to_prompt(facts: dict) -> str:
         lines = [f"FACTS — available boats for {facts['passengers']} people on "
                  f"{facts['date']} ({facts['time']}). Use ONLY these; do not invent "
                  f"boats or prices:"]
+        has_external = False
         for o in facts["options"]:
+            tag = ""
+            if o.get("is_external"):
+                tag = " [ON REQUEST — confirm with partner before payment]"
+                has_external = True
             lines.append(f"- {o['boat']} (up to {o['capacity']} people) — "
                          f"{o['package']}: {o['price']:.0f} EUR "
-                         f"(deposit {o['deposit']:.0f} EUR)")
+                         f"(deposit {o['deposit']:.0f} EUR){tag}")
         lines.append("Present these to the guest in their language, warmly and "
-                     "professionally. Invite them to confirm a boat to proceed with "
-                     "a deposit link. Do NOT add boats or change any price.")
+                     "professionally. Invite them to confirm a boat to proceed.")
+        if has_external:
+            lines.append("For any boat marked [ON REQUEST], do NOT present it as "
+                         "instantly bookable — mention it may need a quick "
+                         "confirmation. If the guest picks an ON REQUEST boat, call "
+                         "request_external_availability (do not send a deposit link "
+                         "yet). For normal boats, proceed straight to the deposit link.")
+        lines.append("If the guest later asks to switch to a different listed boat, "
+                     "simply proceed with that one — do not stall.")
         return "\n".join(lines)
     return ""
