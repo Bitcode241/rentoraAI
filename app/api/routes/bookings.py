@@ -22,11 +22,17 @@ def list_bookings(status: Optional[str] = None, db: Session = Depends(get_db),
 @router.post("", response_model=BookingOut)
 def create_booking(payload: BookingCreate, db: Session = Depends(get_db),
                    user=Depends(get_current_user)):
-    return booking_service.create_booking(
+    b = booking_service.create_booking(
         db, payload.asset_id, payload.customer_id,
         payload.start_datetime, payload.end_datetime,
         source=payload.source, notes=payload.notes, actor=user.username,
-        package_id=payload.package_id)
+        package_id=payload.package_id, passengers=payload.passengers or 0)
+    # admin can mark "pays on boat" (partner collects, we invoice later)
+    if payload.payment_status:
+        b.payment_status = payload.payment_status
+        db.commit()
+        db.refresh(b)
+    return b
 
 
 @router.get("/{booking_id}", response_model=BookingOut)

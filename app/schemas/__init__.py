@@ -144,6 +144,8 @@ class BookingCreate(BaseModel):
     end_datetime: datetime
     package_id: Optional[int] = None
     source: Literal["email", "whatsapp", "admin", "ai"] = "admin"
+    passengers: int = 0
+    payment_status: Optional[str] = None
     notes: str = ""
 
 

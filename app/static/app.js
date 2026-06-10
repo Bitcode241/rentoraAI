@@ -323,6 +323,12 @@ async function bookingModal(){
     <label>Start</label><input id="b_start" type="datetime-local">
     <label>End <span style="color:var(--mut);font-size:11px">(auto from package)</span></label>
     <input id="b_end" type="datetime-local">
+    <label>Broj osoba</label><input id="b_pax" type="number" min="1" value="2">
+    <label>Plaćanje</label>
+    <select id="b_paymode">
+      <option value="paid_to_us">Gost plaća nama (depozit/online)</option>
+      <option value="on_boat">Gost plaća na brodu (partner naplati, mi kasnije ispostavimo račun)</option>
+    </select>
     <div id="b_price" style="font-size:13px;color:var(--deep);margin-top:8px"></div>
     <div class="err" id="merr"></div>
     <div style="display:flex;gap:8px;margin-top:14px">
@@ -354,9 +360,12 @@ function onPkgPick(){
 async function saveBooking(){
   // ensure end is computed from package if user set start after picking
   onPkgPick();
-  try{ await api('/api/bookings',{method:'POST',body:JSON.stringify({
+  try{ const pm = val('b_paymode');
+    await api('/api/bookings',{method:'POST',body:JSON.stringify({
     customer_id:+val('b_cust'),asset_id:+val('b_asset'),
     package_id:+val('b_pkg')||null,
+    passengers:+val('b_pax')||0,
+    payment_status: pm==='on_boat' ? 'pay_on_boat' : 'unpaid',
     start_datetime:new Date(val('b_start')).toISOString(),
     end_datetime:new Date(val('b_end')).toISOString(),source:'admin'})});
     closeModal(); go('Bookings'); }
