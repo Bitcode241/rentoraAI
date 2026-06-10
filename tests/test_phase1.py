@@ -511,3 +511,34 @@ def test_booking_stores_passengers():
                                        source="admin", passengers=6)
     assert b.passengers == 6
     db.close()
+
+
+def test_partner_settlement_directions():
+    from app.services.external_service import settlement
+    # you collect -> you owe partner the rest
+    s1 = settlement(600, 15, "you")
+    assert s1["direction"] == "you_owe_partner" and s1["amount"] == 510.0
+    # partner collects -> partner owes you the commission
+    s2 = settlement(600, 15, "partner")
+    assert s2["direction"] == "partner_owes_you" and s2["amount"] == 90.0
+
+
+def test_mailbox_box_for_type():
+    from app.integrations.email_imap import MultiMailboxManager
+    m = MultiMailboxManager(mailboxes=[])
+    m.type_map = {"boat": "info@seagull.com", "transfer": "info@ragusa.com"}
+    m.services = {"info@seagull.com": object(), "info@ragusa.com": object()}
+    assert m.box_for_type("boat") == "info@seagull.com"
+    assert m.box_for_type("transfer") == "info@ragusa.com"
+    # unknown type falls back to first mailbox
+    assert m.box_for_type("jetski") in m.services
+
+
+def test_partner_voucher_pdf():
+    from app.services import voucher_service
+    pdf = voucher_service.build_voucher(
+        business_name="Seagull", booking_id=5, asset_name="4K Marine",
+        when="25.07.2026 09:00", guests=6, guest_name="Mauro Mehic",
+        guest_phone="+385991234567", partner_name="Partner d.o.o.",
+        settlement_summary="VI partneru dugujete 510 EUR.")
+    assert pdf[:4] == b"%PDF" and len(pdf) > 1000

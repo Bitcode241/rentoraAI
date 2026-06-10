@@ -74,6 +74,7 @@ def build_boat_availability(db: Session, text: str) -> dict | None:
                 "price": p.get("price"),
                 "deposit": p.get("deposit_amount"),
                 "is_external": bool(getattr(a, "is_external", False)),
+                "page_url": getattr(a, "page_url", "") or "",
             })
 
     return {
@@ -106,11 +107,14 @@ def facts_to_prompt(facts: dict) -> str:
             if o.get("is_external"):
                 tag = " [ON REQUEST — confirm with partner before payment]"
                 has_external = True
+            link = f" — details & photos: {o['page_url']}" if o.get("page_url") else ""
             lines.append(f"- {o['boat']} (up to {o['capacity']} people) — "
                          f"{o['package']}: {o['price']:.0f} EUR "
-                         f"(deposit {o['deposit']:.0f} EUR){tag}")
+                         f"(deposit {o['deposit']:.0f} EUR){tag}{link}")
         lines.append("Present these to the guest in their language, warmly and "
-                     "professionally. Invite them to confirm a boat to proceed.")
+                     "professionally. When a boat has a details/photos link, include "
+                     "that link next to the boat so they can see photos and what's "
+                     "included. Invite them to confirm a boat to proceed.")
         if has_external:
             lines.append("For any boat marked [ON REQUEST], do NOT present it as "
                          "instantly bookable — mention it may need a quick "

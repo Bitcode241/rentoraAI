@@ -19,6 +19,7 @@ class MailboxIn(BaseModel):
     smtp_port: int = 465
     use_ssl: bool = True
     active: bool = True
+    handles_type: str = ""
 
 
 class MailboxOut(BaseModel):
@@ -32,6 +33,7 @@ class MailboxOut(BaseModel):
     smtp_port: int
     use_ssl: bool
     active: bool
+    handles_type: str = ""
     has_password: bool = False         # never expose the actual password
 
 
@@ -41,6 +43,7 @@ def _to_out(m: Mailbox) -> dict:
         "imap_host": m.imap_host, "smtp_host": m.smtp_host,
         "imap_port": m.imap_port, "smtp_port": m.smtp_port,
         "use_ssl": m.use_ssl, "active": m.active,
+        "handles_type": getattr(m, "handles_type", "") or "",
         "has_password": bool(m.password),
     }
 
@@ -61,6 +64,7 @@ def create_mailbox(payload: MailboxIn, db: Session = Depends(get_db)):
         imap_host=payload.imap_host, smtp_host=payload.smtp_host,
         imap_port=payload.imap_port, smtp_port=payload.smtp_port,
         use_ssl=payload.use_ssl, active=payload.active,
+        handles_type=payload.handles_type or "",
     )
     db.add(m)
     db.commit()
@@ -85,6 +89,7 @@ def update_mailbox(mailbox_id: int, payload: MailboxIn, db: Session = Depends(ge
     m.smtp_port = payload.smtp_port
     m.use_ssl = payload.use_ssl
     m.active = payload.active
+    m.handles_type = payload.handles_type or ""
     db.commit()
     db.refresh(m)
     return _to_out(m)

@@ -172,15 +172,27 @@ class MultiMailboxManager:
 
     def __init__(self, mailboxes: list | None = None):
         self.services = {}
+        self.type_map = {}   # asset_type -> mailbox address (e.g. "boat" -> seagull)
         boxes = mailboxes if mailboxes is not None else settings.mailboxes()
         for box in boxes:
             svc = ImapSmtpEmailService(box)
             if svc.enabled:
                 self.services[svc.address] = svc
+                htype = (box.get("handles_type") or "").strip().lower()
+                if htype:
+                    self.type_map[htype] = svc.address
         self.enabled = len(self.services) > 0
         if self.enabled:
             log.info("mailboxes_loaded", count=len(self.services),
                      addresses=list(self.services.keys()))
+
+    def box_for_type(self, asset_type: str) -> str:
+        """Pick the mailbox address assigned to this asset type (boat/jetski/
+        transfer). Falls back to the first mailbox if none is tagged."""
+        addr = self.type_map.get((asset_type or "").lower())
+        if addr and addr in self.services:
+            return addr
+        return next(iter(self.services.keys()), "")
 
     @classmethod
     def from_db(cls, db):
@@ -191,6 +203,7 @@ class MultiMailboxManager:
             "address": m.address, "username": m.username, "password": m.password,
             "imap_host": m.imap_host, "smtp_host": m.smtp_host,
             "imap_port": m.imap_port, "smtp_port": m.smtp_port, "use_ssl": m.use_ssl,
+            "handles_type": getattr(m, "handles_type", "") or "",
         } for m in rows]
         if boxes:
             return cls(mailboxes=boxes)

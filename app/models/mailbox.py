@@ -21,3 +21,6 @@ class Mailbox(Base):
     smtp_port: Mapped[int] = mapped_column(Integer, default=465)
     use_ssl: Mapped[bool] = mapped_column(Boolean, default=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Which kind of business this mailbox handles, for routing reminders/replies:
+    # "" = any, "boat", "jetski", "transfer". e.g. seagull=boat, ragusa=transfer.
+    handles_type: Mapped[str] = mapped_column(String(16), default="")

@@ -208,6 +208,7 @@ function bookingTable(b, full){
     ${(x.payment_status!=='deposit_paid')?`<button class="btn btn-sm" onclick="chargeDeposit(${x.id})">Naplati depozit</button>`:''}
     ${(x.payment_status==='deposit_paid')?`<button class="btn btn-sm btn-ghost" onclick="sendConfirm(${x.id})">Pošalji potvrdu</button>`:''}
     ${(x.payment_status==='deposit_paid')?`<button class="btn btn-sm btn-ghost" onclick="refundB(${x.id})">Povrat</button>`:''}
+    <button class="btn btn-sm btn-ghost" onclick="openVoucher(${x.id})">Voucher</button>
     ${x.status!=='cancelled'&&x.status!=='completed'?`<button class="btn btn-sm btn-ghost" onclick="cancelB(${x.id})">Cancel</button>`:''}</td>`:''}</tr>`).join('')}
     </tbody></table>`;
 }
@@ -228,6 +229,7 @@ async function assetModal(id){
     <label>Deposit %</label><input id="m_deppct" type="number" value="${a.deposit_percent||0}">
     <label>Calendar ID</label><input id="m_cal" value="${a.calendar_id||''}">
     <label>Location</label><input id="m_loc" value="${a.location||''}">
+    <label>Link stranice (slike i opis broda)</label><input id="m_page" value="${a.page_url||''}" placeholder="https://...">
     <div style="margin-top:14px;padding:12px;border:1px dashed var(--line);border-radius:6px;background:rgba(15,106,125,.04)">
       <label style="display:flex;align-items:center;gap:8px;font-weight:600;cursor:pointer">
         <input type="checkbox" id="m_ext" ${a.is_external?'checked':''} onchange="document.getElementById('extfields').style.display=this.checked?'block':'none'">
@@ -238,6 +240,11 @@ async function assetModal(id){
         <label>Email vlasnika</label><input id="m_oemail" value="${a.owner_email||''}">
         <label>WhatsApp/telefon vlasnika</label><input id="m_ophone" value="${a.owner_phone||''}" placeholder="+385...">
         <label>Moja provizija (%)</label><input id="m_comm" type="number" value="${a.commission_percent||15}">
+        <label>Tko naplaćuje gosta?</label>
+        <select id="m_paydir">
+          <option value="you" ${(a.payment_direction||'you')==='you'?'selected':''}>Ja naplaćujem (partneru dugujem njegov dio)</option>
+          <option value="partner" ${a.payment_direction==='partner'?'selected':''}>Partner naplaćuje (meni duguje proviziju)</option>
+        </select>
       </div>
     </div>
     ${id?`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
@@ -275,9 +282,11 @@ async function delPkg(pid,assetId){ await api('/api/packages/'+pid,{method:'DELE
 async function saveAsset(id){
   const p = {name:val('m_name'),asset_type:val('m_type'),capacity:+val('m_cap'),
     deposit_percent:+val('m_deppct'),calendar_id:val('m_cal'),location:val('m_loc'),
+    page_url:val('m_page'),
     is_external:document.getElementById('m_ext').checked,
     owner_name:val('m_oname'),owner_email:val('m_oemail'),
-    owner_phone:val('m_ophone'),commission_percent:+val('m_comm')};
+    owner_phone:val('m_ophone'),commission_percent:+val('m_comm'),
+    payment_direction:val('m_paydir')};
   try{ await api(id?'/api/assets/'+id:'/api/assets',
     {method:id?'PATCH':'POST',body:JSON.stringify(p)});
     closeModal(); go('Assets'); }
@@ -504,6 +513,13 @@ async function mailboxModal(id){
       <div style="flex:1"><label>IMAP port</label><input id="mb_iport" type="number" value="${m.imap_port||993}"></div>
       <div style="flex:1"><label>SMTP port</label><input id="mb_sport" type="number" value="${m.smtp_port||465}"></div>
     </div>
+    <label>Za koji tip posla? (podsjetnici/odgovori idu s ovog maila)</label>
+    <select id="mb_type">
+      <option value="" ${!m.handles_type?'selected':''}>Sve / nije bitno</option>
+      <option value="boat" ${m.handles_type==='boat'?'selected':''}>Brodovi</option>
+      <option value="jetski" ${m.handles_type==='jetski'?'selected':''}>Jet ski</option>
+      <option value="transfer" ${m.handles_type==='transfer'?'selected':''}>Transferi</option>
+    </select>
     <div class="err" id="merr"></div>
     <div style="display:flex;gap:8px;margin-top:14px">
     <button class="btn" onclick="saveMailbox(${id||0})">Save</button>
@@ -512,7 +528,8 @@ async function mailboxModal(id){
 async function saveMailbox(id){
   const p = {address:val('mb_addr'),username:val('mb_user')||val('mb_addr'),
     password:val('mb_pass'),imap_host:val('mb_imap'),smtp_host:val('mb_smtp'),
-    imap_port:+val('mb_iport'),smtp_port:+val('mb_sport'),use_ssl:true,active:true};
+    imap_port:+val('mb_iport'),smtp_port:+val('mb_sport'),use_ssl:true,active:true,
+    handles_type:val('mb_type')};
   // on create, password required; on edit, blank means keep
   if(!id && !p.password){ document.getElementById('merr').textContent='Password is required'; return; }
   try{ await api(id?'/api/mailboxes/'+id:'/api/mailboxes',
@@ -573,3 +590,9 @@ async function chargeDeposit(id){
 // auto-login if token cached
 const cached = sessionStorage.getItem('tok');
 if(cached){ TOKEN=cached; boot(); }
+
+function openVoucher(id){
+  // open the partner voucher PDF in a new tab (auth via token in query)
+  const t = localStorage.getItem('token') || '';
+  window.open('/api/bookings/'+id+'/voucher?token='+encodeURIComponent(t), '_blank');
+}

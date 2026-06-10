@@ -20,6 +20,7 @@ class Asset(Base):
     show_license_to_customer: Mapped[bool] = mapped_column(Boolean, default=True)
     fuel_policy: Mapped[str] = mapped_column(String(64), default="full-to-full")
     location: Mapped[str] = mapped_column(String(128), default="")
+    page_url: Mapped[str] = mapped_column(String(512), default="")  # public boat page
     calendar_id: Mapped[str] = mapped_column(String(255), default="")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -30,6 +31,10 @@ class Asset(Base):
     owner_email: Mapped[str] = mapped_column(String(255), default="")
     owner_phone: Mapped[str] = mapped_column(String(64), default="")  # WhatsApp later
     commission_percent: Mapped[float] = mapped_column(Float, default=0.0)  # your cut, e.g. 15
+    # Who collects the guest's money for this partner asset:
+    #  "you"     = you charge the guest, you owe the owner (price - your cut)
+    #  "partner" = the partner charges the guest, they owe you your cut
+    payment_direction: Mapped[str] = mapped_column(String(16), default="you")
 
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

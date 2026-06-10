@@ -36,6 +36,33 @@ def commission_split(price: float, commission_percent: float) -> dict:
             "owner_gets": owner_gets, "commission_percent": commission_percent}
 
 
+def settlement(price: float, commission_percent: float, payment_direction: str) -> dict:
+    """Who owes whom, clearly, based on who collects the guest's money.
+    Returns a dict with a human-readable summary and the amount.
+    """
+    s = commission_split(price, commission_percent)
+    if payment_direction == "partner":
+        # partner collected the full price; they owe you your commission
+        return {
+            "collected_by": "partner",
+            "direction": "partner_owes_you",
+            "amount": s["your_commission"],
+            "summary": f"Partner naplaćuje gosta ({s['guest_pays']:.2f} EUR). "
+                       f"Partner VAMA duguje proviziju: {s['your_commission']:.2f} EUR.",
+            **s,
+        }
+    # default: you collected; you owe the owner their share
+    return {
+        "collected_by": "you",
+        "direction": "you_owe_partner",
+        "amount": s["owner_gets"],
+        "summary": f"Vi naplaćujete gosta ({s['guest_pays']:.2f} EUR). "
+                   f"VI partneru dugujete: {s['owner_gets']:.2f} EUR "
+                   f"(vaša provizija {s['your_commission']:.2f} EUR).",
+        **s,
+    }
+
+
 def create_request(db: Session, asset: Asset, customer: Customer, *,
                    start, end, passengers: int, price: float,
                    guest_mailbox: str = "") -> ExternalRequest:

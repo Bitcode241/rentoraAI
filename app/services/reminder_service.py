@@ -57,32 +57,57 @@ def send_reminders(db: Session, manager=None, business_name="Rentora") -> dict:
     owner_lines = []
     guest_count = 0
     from_box = next(iter(manager.services.keys()), "") if manager.enabled else ""
+    # Collect bookings per partner (external owner) for their own reminders.
+    partner_bookings = {}   # owner_email -> {"name":, "lines":[]}
 
     for b in bookings:
         asset = db.get(Asset, b.asset_id)
         cust = db.get(Customer, b.customer_id)
         when = b.start_datetime.strftime("%d.%m.%Y %H:%M")
         aname = asset.name if asset else "—"
-        details = (f"• {when} — {aname}"
+        pax = f" — {b.passengers} osoba" if getattr(b, "passengers", 0) else ""
+        details = (f"• {when} — {aname}{pax}"
                    f"{(' — ' + (b.package_name or '')) if b.package_name else ''}"
                    f"{(' — ' + cust.full_name) if cust and cust.full_name else ''}")
+        # For partner (external) boats: settlement line + queue a partner reminder.
+        if asset and getattr(asset, "is_external", False):
+            from app.services.external_service import settlement
+            st = settlement(b.total_price or 0,
+                            asset.commission_percent or 0,
+                            getattr(asset, "payment_direction", "you"))
+            owner = asset.owner_name or "partner"
+            details += (f"\n    ↳ PARTNER ({owner}): {st['summary']}")
+            if asset.owner_email:
+                pb = partner_bookings.setdefault(
+                    asset.owner_email, {"name": owner, "lines": []})
+                # partner sees their boat, time, party size, settlement AND the
+                # guest's name + phone (like Viator/GYG) so they can coordinate.
+                gname = cust.full_name if (cust and cust.full_name
+                                           and cust.full_name != (cust.email or "")) else ""
+                gphone = cust.phone if (cust and cust.phone) else ""
+                contact = ""
+                if gname or gphone:
+                    contact = f"\n    Gost: {gname or '—'}, tel: {gphone or '—'}"
+                pb["lines"].append(
+                    f"• {when} — {aname}{pax}{contact}\n    {st['summary']}")
         owner_lines.append(details)
 
-        # guest reminder
+        # guest reminder — sent from the mailbox assigned to this asset's type
         if manager.enabled and cust and cust.email:
+            gbox = manager.box_for_type(asset.asset_type if asset else "") or from_box
             subj, tmpl = _guest_msg(cust.language)
             gdetails = f"{aname}\n{when}"
             if b.package_name:
                 gdetails += f"\n{b.package_name}"
             body = tmpl.format(details=gdetails, business=business_name)
-            manager.reply_from(from_box, cust.email, subj, body)
+            manager.reply_from(gbox, cust.email, subj, body)
             guest_count += 1
 
         b.reminder_sent = True
 
     db.commit()
 
-    # owner summary (one email listing all tomorrow's tours)
+    # owner summary (one email listing ALL tomorrow's tours) — to you
     owner_sent = 0
     if manager.enabled and from_box and owner_lines:
         summary = ("Sutrašnje ture:\n\n" + "\n".join(owner_lines) +
@@ -91,6 +116,21 @@ def send_reminders(db: Session, manager=None, business_name="Rentora") -> dict:
                            f"[PODSJETNIK] Sutrašnje ture ({len(owner_lines)})", summary)
         owner_sent = 1
 
+    # per-partner reminders — each partner gets only THEIR bookings
+    partner_sent = 0
+    if manager.enabled:
+        for owner_email, pb in partner_bookings.items():
+            # boats default to the boat mailbox; fine for partner notices
+            pbox = manager.box_for_type("boat") or from_box
+            body = (f"Pozdrav {pb['name']},\n\nsutrašnje rezervacije za vaše plovilo:\n\n"
+                    + "\n".join(pb["lines"]) +
+                    "\n\nMolimo potvrdite da je sve u redu. Hvala na suradnji!")
+            manager.reply_from(pbox, owner_email,
+                               f"[PODSJETNIK] Sutrašnje rezervacije ({len(pb['lines'])})",
+                               body)
+            partner_sent += 1
+
     log.info("reminders_sent", owner=owner_sent, guests=guest_count,
-             bookings=len(bookings))
-    return {"owner": owner_sent, "guests": guest_count, "bookings": len(bookings)}
+             partners=partner_sent, bookings=len(bookings))
+    return {"owner": owner_sent, "guests": guest_count, "partners": partner_sent,
+            "bookings": len(bookings)}

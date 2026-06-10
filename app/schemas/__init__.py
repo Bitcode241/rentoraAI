@@ -59,6 +59,7 @@ class AssetBase(BaseModel):
     show_license_to_customer: bool = True
     fuel_policy: str = "full-to-full"
     location: str = ""
+    page_url: str = ""
     calendar_id: str = ""
     active: bool = True
     # External (partner) asset fields
@@ -67,6 +68,7 @@ class AssetBase(BaseModel):
     owner_email: str = ""
     owner_phone: str = ""
     commission_percent: float = 0.0
+    payment_direction: str = "you"
 
 
 class AssetCreate(AssetBase):
@@ -86,6 +88,7 @@ class AssetUpdate(BaseModel):
     show_license_to_customer: Optional[bool] = None
     fuel_policy: Optional[str] = None
     location: Optional[str] = None
+    page_url: Optional[str] = None
     calendar_id: Optional[str] = None
     active: Optional[bool] = None
     is_external: Optional[bool] = None
@@ -93,6 +96,7 @@ class AssetUpdate(BaseModel):
     owner_email: Optional[str] = None
     owner_phone: Optional[str] = None
     commission_percent: Optional[float] = None
+    payment_direction: Optional[str] = None
 
 
 class AssetOut(AssetBase):

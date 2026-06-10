@@ -58,3 +58,52 @@ def update_booking(booking_id: int, payload: BookingUpdate,
     db.commit()
     db.refresh(b)
     return b
+
+
+@router.get("/{booking_id}/voucher")
+def partner_voucher(booking_id: int, token: str = "",
+                    db: Session = Depends(get_db)):
+    """Generate the partner voucher PDF for a booking (external/partner boats).
+    Accepts the auth token as a query param so it can open in a new browser tab."""
+    from fastapi import Response
+    from app.core.security import decode_token
+    from app.models.user import User
+    # authenticate via query token (new-tab friendly)
+    try:
+        payload = decode_token(token)
+        username = payload.get("sub")
+        user = db.query(User).filter(User.username == username).first()
+        if not user:
+            raise HTTPException(401, "Unauthorized")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(401, "Unauthorized")
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.services import voucher_service
+    from app.services.external_service import settlement
+    from app.core.config import settings as cfg
+    b = db.get(Booking, booking_id)
+    if not b:
+        raise HTTPException(404, "Booking not found")
+    asset = db.get(Asset, b.asset_id)
+    cust = db.get(Customer, b.customer_id)
+    when = b.start_datetime.strftime("%d.%m.%Y %H:%M")
+    st_summary = ""
+    if asset and getattr(asset, "is_external", False):
+        st = settlement(b.total_price or 0, asset.commission_percent or 0,
+                        getattr(asset, "payment_direction", "you"))
+        st_summary = st["summary"]
+    gname = (cust.full_name if cust and cust.full_name and
+             cust.full_name != (cust.email or "") else "")
+    pdf = voucher_service.build_voucher(
+        business_name=getattr(cfg, "business_name", "") or "Rentora",
+        booking_id=b.id, asset_name=asset.name if asset else "—", when=when,
+        guests=getattr(b, "passengers", 0) or "—",
+        guest_name=gname, guest_phone=(cust.phone if cust else "") or "",
+        partner_name=(asset.owner_name if asset else "") or "",
+        settlement_summary=st_summary)
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition":
+                             f'inline; filename="voucher-{b.id}.pdf"'})
