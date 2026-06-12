@@ -21,6 +21,7 @@ class Asset(Base):
     fuel_policy: Mapped[str] = mapped_column(String(64), default="full-to-full")
     location: Mapped[str] = mapped_column(String(128), default="")
     page_url: Mapped[str] = mapped_column(String(512), default="")  # public boat page
+    default_pickup: Mapped[str] = mapped_column(String(255), default="")  # partner's usual pickup
     calendar_id: Mapped[str] = mapped_column(String(255), default="")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 

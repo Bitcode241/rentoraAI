@@ -230,6 +230,7 @@ async function assetModal(id){
     <label>Calendar ID</label><input id="m_cal" value="${a.calendar_id||''}">
     <label>Location</label><input id="m_loc" value="${a.location||''}">
     <label>Link stranice (slike i opis broda)</label><input id="m_page" value="${a.page_url||''}" placeholder="https://...">
+    <label>Zadana pickup lokacija (partner)</label><input id="m_pickup" value="${a.default_pickup||''}" placeholder="Lapadska obala 4, Dubrovnik">
     <div style="margin-top:14px;padding:12px;border:1px dashed var(--line);border-radius:6px;background:rgba(15,106,125,.04)">
       <label style="display:flex;align-items:center;gap:8px;font-weight:600;cursor:pointer">
         <input type="checkbox" id="m_ext" ${a.is_external?'checked':''} onchange="document.getElementById('extfields').style.display=this.checked?'block':'none'">
@@ -282,7 +283,7 @@ async function delPkg(pid,assetId){ await api('/api/packages/'+pid,{method:'DELE
 async function saveAsset(id){
   const p = {name:val('m_name'),asset_type:val('m_type'),capacity:+val('m_cap'),
     deposit_percent:+val('m_deppct'),calendar_id:val('m_cal'),location:val('m_loc'),
-    page_url:val('m_page'),
+    page_url:val('m_page'),default_pickup:val('m_pickup'),
     is_external:document.getElementById('m_ext').checked,
     owner_name:val('m_oname'),owner_email:val('m_oemail'),
     owner_phone:val('m_ophone'),commission_percent:+val('m_comm'),
@@ -315,8 +316,15 @@ async function bookingModal(){
   const [assets,customers] = await Promise.all([api('/api/assets'),api('/api/customers')]);
   window._assets = assets;
   openModal(`<h3>New booking</h3>
-    <label>Customer</label><select id="b_cust">${customers.map(c=>
-      `<option value="${c.id}">${c.full_name}</option>`).join('')}</select>
+    <label>Postojeći gost (ili upiši novog dolje)</label><select id="b_cust">
+      <option value="">— novi gost —</option>
+      ${customers.map(c=>`<option value="${c.id}">${c.full_name}${c.phone?(' · '+c.phone):''}</option>`).join('')}</select>
+    <div style="background:var(--light,#eef3f3);padding:10px;border-radius:8px;margin:8px 0">
+      <div style="font-size:12px;color:var(--mut);margin-bottom:6px">Novi gost (ako nije gore odabran):</div>
+      <label>Ime i prezime gosta</label><input id="b_gname" placeholder="Mauro Mehic">
+      <label>Telefon gosta</label><input id="b_gphone" placeholder="+385...">
+      <label>Email gosta</label><input id="b_gemail" placeholder="gost@email.com">
+    </div>
     <label>Asset</label><select id="b_asset" onchange="onAssetPick()">${assets.map(a=>
       `<option value="${a.id}">${a.name} (${a.asset_type}, cap ${a.capacity})</option>`).join('')}</select>
     <label>Package</label><select id="b_pkg" onchange="onPkgPick()"></select>
@@ -324,11 +332,14 @@ async function bookingModal(){
     <label>End <span style="color:var(--mut);font-size:11px">(auto from package)</span></label>
     <input id="b_end" type="datetime-local">
     <label>Broj osoba</label><input id="b_pax" type="number" min="1" value="2">
+    <label>Pickup lokacija</label><input id="b_pickup" placeholder="Lapadska obala 4, Dubrovnik">
     <label>Plaćanje</label>
-    <select id="b_paymode">
+    <select id="b_paymode" onchange="onPayModePick()">
       <option value="paid_to_us">Gost plaća nama (depozit/online)</option>
       <option value="on_boat">Gost plaća na brodu (partner naplati, mi kasnije ispostavimo račun)</option>
     </select>
+    <label>Depozit (EUR) <span style="color:var(--mut);font-size:11px">(prazno = auto)</span></label>
+    <input id="b_deposit" type="number" step="0.01" placeholder="auto">
     <div id="b_price" style="font-size:13px;color:var(--deep);margin-top:8px"></div>
     <div class="err" id="merr"></div>
     <div style="display:flex;gap:8px;margin-top:14px">
@@ -360,17 +371,31 @@ function onPkgPick(){
 async function saveBooking(){
   // ensure end is computed from package if user set start after picking
   onPkgPick();
-  try{ const pm = val('b_paymode');
+  try{
+    let custId = +val('b_cust') || 0;
+    // create a new guest on the fly if no existing customer was picked
+    if(!custId){
+      const gname = val('b_gname').trim();
+      if(!gname){ document.getElementById('merr').textContent='Odaberi gosta ili upiši ime novog gosta.'; return; }
+      const nc = await api('/api/customers',{method:'POST',body:JSON.stringify({
+        full_name:gname, phone:val('b_gphone'), email:val('b_gemail'), language:'en'})});
+      custId = nc.id;
+    }
+    const pm = val('b_paymode');
+    const dep = val('b_deposit');
     await api('/api/bookings',{method:'POST',body:JSON.stringify({
-    customer_id:+val('b_cust'),asset_id:+val('b_asset'),
-    package_id:+val('b_pkg')||null,
-    passengers:+val('b_pax')||0,
-    payment_status: pm==='on_boat' ? 'pay_on_boat' : 'unpaid',
-    start_datetime:new Date(val('b_start')).toISOString(),
-    end_datetime:new Date(val('b_end')).toISOString(),source:'admin'})});
+      customer_id:custId, asset_id:+val('b_asset'),
+      package_id:+val('b_pkg')||null,
+      passengers:+val('b_pax')||0,
+      pickup_location:val('b_pickup'),
+      deposit_amount: dep!=='' ? +dep : null,
+      payment_status: pm==='on_boat' ? 'pay_on_boat' : 'unpaid',
+      start_datetime:new Date(val('b_start')).toISOString(),
+      end_datetime:new Date(val('b_end')).toISOString(),source:'admin'})});
     closeModal(); go('Bookings'); }
   catch(e){ document.getElementById('merr').textContent=e.message; }
 }
+function onPayModePick(){ /* reserved for future UI hints */ }
 async function confirmB(id){ try{ await api('/api/bookings/'+id+'/confirm',{method:'POST'}); go('Bookings'); }
   catch(e){ alert(e.message); } }
 async function cancelB(id){ if(!confirm('Cancel booking #'+id+'?'))return;
@@ -602,6 +627,6 @@ if(cached){ TOKEN=cached; boot(); }
 
 function openVoucher(id){
   // open the partner voucher PDF in a new tab (auth via token in query)
-  const t = localStorage.getItem('token') || '';
+  const t = sessionStorage.getItem('tok') || '';
   window.open('/api/bookings/'+id+'/voucher?token='+encodeURIComponent(t), '_blank');
 }

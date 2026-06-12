@@ -120,7 +120,7 @@ def _send_confirmation(db, booking):
         package=booking.package_name or "",
         deposit_paid=booking.amount_paid or 0, full_price=booking.total_price or 0,
         balance=balance, transfer_included=bool(getattr(booking, "transfer_note", "")),
-        location=asset.location if asset else "",
+        location=(getattr(booking, "pickup_location", "") or (asset.location if asset else "")),
         phone=cust.phone or "",
         guest_name=(cust.full_name or "") if (cust.full_name and cust.full_name != cust.email) else "",
         guest_email=cust.email or "",

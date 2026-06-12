@@ -30,8 +30,19 @@ def create_booking(payload: BookingCreate, db: Session = Depends(get_db),
     # admin can mark "pays on boat" (partner collects, we invoice later)
     if payload.payment_status:
         b.payment_status = payload.payment_status
-        db.commit()
-        db.refresh(b)
+    # pickup: use what was entered, else fall back to the asset's default pickup
+    pickup = (payload.pickup_location or "").strip()
+    if not pickup:
+        from app.models.asset import Asset
+        a = db.get(Asset, payload.asset_id)
+        pickup = (getattr(a, "default_pickup", "") or "") if a else ""
+    if pickup:
+        b.pickup_location = pickup
+    # manual deposit override
+    if payload.deposit_amount is not None:
+        b.deposit_amount = payload.deposit_amount
+    db.commit()
+    db.refresh(b)
     return b
 
 

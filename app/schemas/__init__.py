@@ -60,6 +60,7 @@ class AssetBase(BaseModel):
     fuel_policy: str = "full-to-full"
     location: str = ""
     page_url: str = ""
+    default_pickup: str = ""
     calendar_id: str = ""
     active: bool = True
     # External (partner) asset fields
@@ -89,6 +90,7 @@ class AssetUpdate(BaseModel):
     fuel_policy: Optional[str] = None
     location: Optional[str] = None
     page_url: Optional[str] = None
+    default_pickup: Optional[str] = None
     calendar_id: Optional[str] = None
     active: Optional[bool] = None
     is_external: Optional[bool] = None
@@ -146,6 +148,8 @@ class BookingCreate(BaseModel):
     source: Literal["email", "whatsapp", "admin", "ai"] = "admin"
     passengers: int = 0
     payment_status: Optional[str] = None
+    pickup_location: str = ""
+    deposit_amount: Optional[float] = None
     notes: str = ""
 
 

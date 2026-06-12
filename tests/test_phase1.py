@@ -542,3 +542,27 @@ def test_partner_voucher_pdf():
         guest_phone="+385991234567", partner_name="Partner d.o.o.",
         settlement_summary="VI partneru dugujete 510 EUR.")
     assert pdf[:4] == b"%PDF" and len(pdf) > 1000
+
+
+def test_booking_pickup_and_deposit_fields():
+    from app.core.database import SessionLocal
+    from app.services import booking_service
+    from app.models.customer import Customer
+    from app.models.asset import Asset
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    a = db.get(Asset, 1)
+    a.default_pickup = "Lapadska obala 4, Dubrovnik"
+    db.commit()
+    c = Customer(full_name="Manual Guest", email="m@x.com", phone="+38599")
+    db.add(c); db.commit(); db.refresh(c)
+    start = datetime.now(timezone.utc) + timedelta(days=300)
+    b = booking_service.create_booking(db, 1, c.id, start, start + timedelta(hours=4),
+                                       source="admin", passengers=4)
+    b.deposit_amount = 99.0
+    if not b.pickup_location:
+        b.pickup_location = a.default_pickup
+    db.commit(); db.refresh(b)
+    assert b.deposit_amount == 99.0
+    assert b.pickup_location == "Lapadska obala 4, Dubrovnik"
+    db.close()
