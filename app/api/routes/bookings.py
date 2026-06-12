@@ -106,7 +106,12 @@ def partner_voucher(booking_id: int, token: str = "",
         raise HTTPException(404, "Booking not found")
     asset = db.get(Asset, b.asset_id)
     cust = db.get(Customer, b.customer_id)
-    when = b.start_datetime.strftime("%d.%m.%Y %H:%M")
+    from app.core.timeutil import fmt_local
+    # show local time (Europe/Zagreb), with end time, so 18:30 reads 18:30
+    when = fmt_local(b.start_datetime)
+    if b.end_datetime:
+        when += "–" + fmt_local(b.end_datetime, "%H:%M")
+    tour = b.package_name or ""
     st_summary = ""
     if asset and getattr(asset, "is_external", False):
         st = settlement(b.total_price or 0, asset.commission_percent or 0,
@@ -121,6 +126,7 @@ def partner_voucher(booking_id: int, token: str = "",
     pdf = voucher_service.build_voucher(
         business_name=getattr(cfg, "business_name", "") or "Rentora",
         booking_id=b.id, asset_name=asset.name if asset else "—", when=when,
+        tour_name=tour,
         guests=getattr(b, "passengers", 0) or "—",
         guest_name=gname, guest_phone=(cust.phone if cust else "") or "",
         partner_name=(asset.owner_name if asset else "") or "",

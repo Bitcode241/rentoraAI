@@ -8,7 +8,7 @@ from app.services.confirmation_service import _register_fonts
 
 
 def build_voucher(*, business_name, booking_id, asset_name, when, guests,
-                  guest_name="", guest_phone="", partner_name="",
+                  tour_name="", guest_name="", guest_phone="", partner_name="",
                   settlement_summary="", balance_to_collect=0.0,
                   deposit_paid=0.0, total_price=0.0, transfer_note="",
                   pickup_location="", currency="EUR") -> bytes:
@@ -59,6 +59,7 @@ def build_voucher(*, business_name, booking_id, asset_name, when, guests,
     rows = [
         ("Partner", partner_name or "—"),
         ("Plovilo / Vessel", asset_name),
+        ("Tura / Tour", tour_name or "—"),
         ("Datum i vrijeme / Date", when),
         ("Broj osoba / Guests", str(guests)),
         ("Gost / Guest", guest_name or "—"),
