@@ -607,3 +607,54 @@ def test_default_deposit_fallback():
     assert b.total_price > 0
     assert b.deposit_amount > 0  # default % applied, not 0
     db.close()
+
+
+def test_business_name_setting():
+    from app.core.database import SessionLocal
+    from app.services import settings_service as ss
+    db = SessionLocal()
+    # default fallback
+    assert ss.business_name(db) == "Seagull Dubrovnik"
+    ss.set(db, ss.BUSINESS_NAME_KEY, "My Charter Co")
+    assert ss.business_name(db) == "My Charter Co"
+    db.close()
+
+
+def test_brand_per_type():
+    from app.core.database import SessionLocal
+    from app.services import settings_service as ss
+    db = SessionLocal()
+    assert ss.brand_for_type(db, "boat") == "Seagull Dubrovnik"
+    assert ss.brand_for_type(db, "jetski") == "Jetski Dubrovnik"
+    assert ss.brand_for_type(db, "transfer") == "Ragusa Transfer"
+    assert ss.brand_for_type(db, "car") == "Ragusa Transfer"
+    ss.set(db, "brand_jetski", "Jetski DBK Pro")
+    assert ss.brand_for_type(db, "jetski") == "Jetski DBK Pro"
+    db.close()
+
+
+def test_availability_chain_priority():
+    """Same-model boats: lowest priority offered first; falls to next when busy."""
+    from app.core.database import SessionLocal
+    from app.services import chain_service, booking_service
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    boats = db.query(Asset).filter(Asset.asset_type == "boat").limit(2).all()
+    a, b = boats[0], boats[1]
+    a.model_group = "grp-x"; a.booking_priority = 1
+    b.model_group = "grp-x"; b.booking_priority = 2
+    db.commit()
+    start = datetime.now(timezone.utc) + timedelta(days=360, hours=9)
+    end = start + timedelta(hours=4)
+    # both free -> picks priority 1
+    r = chain_service.pick_for_window(db, a, start, end)
+    assert r["asset"].id == a.id and r["was_redirected"] is False
+    # occupy priority 1 -> picks priority 2
+    c = Customer(full_name="Chain", email="ch@x.com")
+    db.add(c); db.commit(); db.refresh(c)
+    booking_service.create_booking(db, a.id, c.id, start, end, source="admin")
+    r2 = chain_service.pick_for_window(db, a, start, end)
+    assert r2["asset"].id == b.id and r2["was_redirected"] is True
+    db.close()

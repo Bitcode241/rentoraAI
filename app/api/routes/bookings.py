@@ -123,8 +123,10 @@ def partner_voucher(booking_id: int, token: str = "",
     total = b.total_price or 0
     paid = b.amount_paid or 0
     balance = max(total - paid, 0) if paid > 0 else 0
+    from app.services import settings_service
+    biz = settings_service.brand_for_type(db, asset.asset_type if asset else "")
     pdf = voucher_service.build_voucher(
-        business_name=getattr(cfg, "business_name", "") or "Rentora",
+        business_name=biz,
         booking_id=b.id, asset_name=asset.name if asset else "—", when=when,
         tour_name=tour,
         guests=getattr(b, "passengers", 0) or "—",

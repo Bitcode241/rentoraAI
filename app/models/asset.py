@@ -36,6 +36,12 @@ class Asset(Base):
     #  "you"     = you charge the guest, you owe the owner (price - your cut)
     #  "partner" = the partner charges the guest, they owe you your cut
     payment_direction: Mapped[str] = mapped_column(String(16), default="you")
+    # Availability chain: when several boats are the same model, the one with the
+    # LOWEST priority is offered first (your own boat = 1, then partners you choose).
+    booking_priority: Mapped[int] = mapped_column(Integer, default=100)
+    # Group equivalent boats so the chain knows they're interchangeable
+    # (e.g. all "Barracuda 545" share model_group="barracuda-545").
+    model_group: Mapped[str] = mapped_column(String(64), default="")
 
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

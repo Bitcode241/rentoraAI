@@ -135,10 +135,18 @@ const RENDER = {
       <div class="panel">${bookingTable(b,true)}</div>`;
   },
   'Settings': async (v)=>{
-    const lt = await api('/api/settings/lead-times');
+    const [lt, biz] = await Promise.all([api('/api/settings/lead-times'), api('/api/settings/business')]);
     v.innerHTML = `<div class="panel" style="max-width:520px">
-      <h3 style="margin-top:0">Minimalno vrijeme rezervacije unaprijed</h3>
-      <p style="color:var(--mut);font-size:13px">Koliko sati prije početka gost može najkasnije rezervirati. AI neće dopustiti rezervaciju unutar ovog vremena. (Tvoje admin rezervacije nisu ograničene.)</p>
+      <h3 style="margin-top:0">Brendovi (što gosti vide)</h3>
+      <p style="color:var(--mut);font-size:13px">Ime koje gost vidi na potvrdi/vaučeru ovisi o tome što je bukirao.</p>
+      <label>Brodovi</label><input id="set_brand_boat" value="${biz.brand_boat||''}" placeholder="Seagull Dubrovnik">
+      <label>Jet ski</label><input id="set_brand_jetski" value="${biz.brand_jetski||''}" placeholder="Jetski Dubrovnik">
+      <label>Transferi</label><input id="set_brand_transfer" value="${biz.brand_transfer||''}" placeholder="Ragusa Transfer">
+      <label>Zadani depozit (%)</label><input id="set_dep" type="number" min="0" max="100" value="${biz.default_deposit_percent||30}">
+      <div style="margin:12px 0 20px"><button class="btn" onclick="saveBusiness()">Spremi brendove</button>
+      <span id="biz_msg" style="margin-left:12px;color:var(--good);font-size:13px"></span></div>
+      <h3>Minimalno vrijeme rezervacije unaprijed</h3>
+      <p style="color:var(--mut);font-size:13px">Koliko sati prije početka gost može najkasnije rezervirati. (Tvoje admin rezervacije nisu ograničene.)</p>
       <label>Jet ski (sati)</label><input id="lt_jetski" type="number" min="0" value="${lt.jetski}">
       <label>Gliseri / brodovi (sati)</label><input id="lt_boat" type="number" min="0" value="${lt.boat}">
       <label>Transferi (sati)</label><input id="lt_transfer" type="number" min="0" value="${lt.transfer}">
@@ -232,6 +240,10 @@ async function assetModal(id){
     <label>Location</label><input id="m_loc" value="${a.location||''}">
     <label>Link stranice (slike i opis broda)</label><input id="m_page" value="${a.page_url||''}" placeholder="https://...">
     <label>Zadana pickup lokacija (partner)</label><input id="m_pickup" value="${a.default_pickup||''}" placeholder="Lapadska obala 4, Dubrovnik">
+    <label>Grupa modela <span style="color:var(--mut);font-size:11px">(isti brodovi dijele istu grupu, npr. "barracuda-545")</span></label>
+    <input id="m_group" value="${a.model_group||''}" placeholder="barracuda-545">
+    <label>Prioritet <span style="color:var(--mut);font-size:11px">(manji = prvo se nudi; tvoj brod = 1)</span></label>
+    <input id="m_prio" type="number" min="1" value="${a.booking_priority||100}">
     <div style="margin-top:14px;padding:12px;border:1px dashed var(--line);border-radius:6px;background:rgba(15,106,125,.04)">
       <label style="display:flex;align-items:center;gap:8px;font-weight:600;cursor:pointer">
         <input type="checkbox" id="m_ext" ${a.is_external?'checked':''} onchange="document.getElementById('extfields').style.display=this.checked?'block':'none'">
@@ -285,6 +297,7 @@ async function saveAsset(id){
   const p = {name:val('m_name'),asset_type:val('m_type'),capacity:+val('m_cap'),
     deposit_percent:+val('m_deppct'),calendar_id:val('m_cal'),location:val('m_loc'),
     page_url:val('m_page'),default_pickup:val('m_pickup'),
+    model_group:val('m_group'),booking_priority:+val('m_prio')||100,
     is_external:document.getElementById('m_ext').checked,
     owner_name:val('m_oname'),owner_email:val('m_oemail'),
     owner_phone:val('m_ophone'),commission_percent:+val('m_comm'),
@@ -673,4 +686,15 @@ function openVoucher(id){
   // open the partner voucher PDF in a new tab (auth via token in query)
   const t = sessionStorage.getItem('tok') || '';
   window.open('/api/bookings/'+id+'/voucher?token='+encodeURIComponent(t), '_blank');
+}
+
+async function saveBusiness(){
+  try{
+    await api('/api/settings/business',{method:'PUT',body:JSON.stringify({
+      brand_boat:val('set_brand_boat'),
+      brand_jetski:val('set_brand_jetski'),
+      brand_transfer:val('set_brand_transfer'),
+      default_deposit_percent:+val('set_dep')||30})});
+    const m=document.getElementById('biz_msg'); if(m) m.textContent='Spremljeno ✓';
+  }catch(e){ alert(e.message); }
 }

@@ -30,3 +30,30 @@ def trigger_reminders(db: Session = Depends(get_db)):
     """Manually run the day-before reminder job now (for testing)."""
     from app.services.reminder_service import send_reminders
     return send_reminders(db)
+
+
+@router.get("/business")
+def get_business(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    from app.services import settings_service
+    return {
+        "business_name": settings_service.business_name(db),
+        "default_deposit_percent": settings_service.default_deposit_percent(db),
+        "brand_boat": settings_service.brand_for_type(db, "boat"),
+        "brand_jetski": settings_service.brand_for_type(db, "jetski"),
+        "brand_transfer": settings_service.brand_for_type(db, "transfer"),
+    }
+
+
+@router.put("/business", dependencies=[Depends(require_admin)])
+def update_business(payload: dict, db: Session = Depends(get_db)):
+    from app.services import settings_service
+    if "business_name" in payload:
+        settings_service.set(db, settings_service.BUSINESS_NAME_KEY,
+                             str(payload["business_name"]).strip())
+    if "default_deposit_percent" in payload:
+        settings_service.set(db, settings_service.DEFAULT_DEPOSIT_KEY,
+                             str(payload["default_deposit_percent"]))
+    for k in ("brand_boat", "brand_jetski", "brand_transfer"):
+        if k in payload:
+            settings_service.set(db, k, str(payload[k]).strip())
+    return {"ok": True}

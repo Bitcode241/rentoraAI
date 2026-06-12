@@ -57,9 +57,19 @@ def build_boat_availability(db: Session, text: str) -> dict | None:
     end = start + timedelta(hours=dur_h)
 
     results = find_available(db, "boat", passengers, start, end)
-    options = []
+    # Collapse same-model boats to ONE option (the highest-priority available one),
+    # so the guest sees "Barracuda 545" once, not your + partner's listed separately.
+    from app.services.chain_service import _group_of
+    best_by_group = {}
     for entry in results:
         a = entry["asset"]
+        g = _group_of(a)
+        prio = getattr(a, "booking_priority", 100) or 100
+        if g not in best_by_group or prio < best_by_group[g][0]:
+            best_by_group[g] = (prio, a)
+
+    options = []
+    for _prio, a in sorted(best_by_group.values(), key=lambda x: x[0]):
         pkgs = pricing.list_packages(a)
         # show the package matching the requested duration if present, else all
         target_min = 480 if full_day else 240

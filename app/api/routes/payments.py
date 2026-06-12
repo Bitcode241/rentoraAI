@@ -89,7 +89,8 @@ def _notify_owner_paid(db, booking):
     if not mgr.enabled:
         return
     box = next(iter(mgr.services.keys()), "")
-    when = booking.start_datetime.strftime("%d.%m.%Y %H:%M")
+    from app.core.timeutil import fmt_local
+    when = fmt_local(booking.start_datetime)
     body = (f"Gost je platio depozit!\n\n"
             f"Plovilo: {asset.name if asset else '—'}\n"
             f"Termin: {when}\n"
@@ -111,8 +112,10 @@ def _send_confirmation(db, booking):
         return
     lang = cust.language or "en"
     balance = max((booking.total_price or 0) - (booking.amount_paid or 0), 0)
-    when = booking.start_datetime.strftime("%d.%m.%Y %H:%M")
-    business = getattr(_s, "app_name", "Rentora")
+    from app.core.timeutil import fmt_local
+    when = fmt_local(booking.start_datetime)
+    from app.services import settings_service
+    business = settings_service.brand_for_type(db, asset.asset_type if asset else "")
     pdf = confirmation_service.build_pdf(
         lang=lang, business_name=business, booking_id=booking.id,
         asset_name=asset.name if asset else "—", when=when,

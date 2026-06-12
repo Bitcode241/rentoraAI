@@ -10,6 +10,43 @@ from app.models.app_setting import AppSetting
 
 LEAD_TIME_KEY = "lead_time_hours"
 DEFAULT_DEPOSIT_KEY = "default_deposit_percent"
+BUSINESS_NAME_KEY = "business_name"
+# Per-type brand names. Guests booking a boat see the boat brand, jetski guests
+# the jetski brand, transfers the transfer brand. Falls back to the global name.
+BRAND_KEYS = {
+    "boat": "brand_boat",
+    "jetski": "brand_jetski",
+    "transfer": "brand_transfer",
+    "car": "brand_transfer",
+    "van": "brand_transfer",
+}
+_BRAND_FALLBACKS = {
+    "boat": "Seagull Dubrovnik",
+    "jetski": "Jetski Dubrovnik",
+    "transfer": "Ragusa Transfer",
+    "car": "Ragusa Transfer",
+    "van": "Ragusa Transfer",
+}
+
+
+def business_name(db: Session, fallback: str = "Seagull Dubrovnik") -> str:
+    """Global company name (used when no per-type brand applies)."""
+    v = get(db, BUSINESS_NAME_KEY, None)
+    return (v or "").strip() or fallback
+
+
+def brand_for_type(db: Session, asset_type: str) -> str:
+    """Brand shown to guests for a given asset type. Boats -> Seagull,
+    jetski -> Jetski Dubrovnik, transfer -> Ragusa Transfer, etc. Each is
+    editable in admin; falls back to a sensible default, then the global name."""
+    t = (asset_type or "").lower()
+    key = BRAND_KEYS.get(t)
+    if key:
+        v = (get(db, key, None) or "").strip()
+        if v:
+            return v
+    # fall back to a type default, else the global business name
+    return _BRAND_FALLBACKS.get(t) or business_name(db)
 
 
 def default_deposit_percent(db: Session, fallback: float = 30.0) -> float:
