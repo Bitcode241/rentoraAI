@@ -328,8 +328,8 @@ async function bookingModal(){
     <label>Asset</label><select id="b_asset" onchange="onAssetPick()">${assets.map(a=>
       `<option value="${a.id}">${a.name} (${a.asset_type}, cap ${a.capacity})</option>`).join('')}</select>
     <label>Package</label><select id="b_pkg" onchange="onPkgPick()"></select>
-    <label>Start</label><input id="b_start" type="datetime-local">
-    <label>End <span style="color:var(--mut);font-size:11px">(auto from package)</span></label>
+    <label>Start</label><input id="b_start" type="datetime-local" onchange="onPkgPick()">
+    <label>End <span style="color:var(--mut);font-size:11px">(auto iz paketa)</span></label>
     <input id="b_end" type="datetime-local">
     <label>Broj osoba</label><input id="b_pax" type="number" min="1" value="2">
     <label>Pickup lokacija</label><input id="b_pickup" placeholder="Lapadska obala 4, Dubrovnik">
@@ -359,10 +359,16 @@ function onPkgPick(){
   const opt = document.getElementById('b_pkg').selectedOptions[0];
   if(!opt||!opt.value){ document.getElementById('b_price').textContent=''; return; }
   const price = +opt.dataset.price, dur = +opt.dataset.dur;
-  // auto-fill end from start + duration
+  // auto-fill end from start + duration, in LOCAL time (no UTC shift)
   const s = val('b_start');
-  if(s){ const end = new Date(new Date(s).getTime()+dur*60000);
-    document.getElementById('b_end').value = end.toISOString().slice(0,16); }
+  if(s){
+    const end = new Date(new Date(s).getTime()+dur*60000);
+    // build a local 'YYYY-MM-DDTHH:MM' string so the field shows the right clock time
+    const pad=n=>String(n).padStart(2,'0');
+    const local = end.getFullYear()+'-'+pad(end.getMonth()+1)+'-'+pad(end.getDate())+
+                  'T'+pad(end.getHours())+':'+pad(end.getMinutes());
+    document.getElementById('b_end').value = local;
+  }
   const a = window._assets.find(x=>x.id===+val('b_asset'));
   const dep = a.deposit_percent ? price*a.deposit_percent/100 : 0;
   document.getElementById('b_price').textContent =
@@ -371,6 +377,12 @@ function onPkgPick(){
 async function saveBooking(){
   // ensure end is computed from package if user set start after picking
   onPkgPick();
+  const sv = val('b_start'), ev = val('b_end');
+  if(!sv){ document.getElementById('merr').textContent='Upiši vrijeme početka.'; return; }
+  if(!ev || new Date(ev) <= new Date(sv)){
+    document.getElementById('merr').textContent='Odaberi paket (kraj se računa sam) ili upiši kraj nakon početka.';
+    return;
+  }
   try{
     let custId = +val('b_cust') || 0;
     // create a new guest on the fly if no existing customer was picked
