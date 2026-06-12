@@ -114,13 +114,20 @@ def partner_voucher(booking_id: int, token: str = "",
         st_summary = st["summary"]
     gname = (cust.full_name if cust and cust.full_name and
              cust.full_name != (cust.email or "") else "")
+    # what the partner must collect from the guest in cash = total - already paid to us
+    total = b.total_price or 0
+    paid = b.amount_paid or 0
+    balance = max(total - paid, 0) if paid > 0 else 0
     pdf = voucher_service.build_voucher(
         business_name=getattr(cfg, "business_name", "") or "Rentora",
         booking_id=b.id, asset_name=asset.name if asset else "—", when=when,
         guests=getattr(b, "passengers", 0) or "—",
         guest_name=gname, guest_phone=(cust.phone if cust else "") or "",
         partner_name=(asset.owner_name if asset else "") or "",
-        settlement_summary=st_summary)
+        settlement_summary=st_summary,
+        balance_to_collect=balance, deposit_paid=paid, total_price=total,
+        transfer_note=getattr(b, "transfer_note", "") or "",
+        pickup_location=getattr(b, "pickup_location", "") or "")
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition":
                              f'inline; filename="voucher-{b.id}.pdf"'})

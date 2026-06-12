@@ -9,7 +9,9 @@ from app.services.confirmation_service import _register_fonts
 
 def build_voucher(*, business_name, booking_id, asset_name, when, guests,
                   guest_name="", guest_phone="", partner_name="",
-                  settlement_summary="", currency="EUR") -> bytes:
+                  settlement_summary="", balance_to_collect=0.0,
+                  deposit_paid=0.0, total_price=0.0, transfer_note="",
+                  pickup_location="", currency="EUR") -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.lib import colors
@@ -62,6 +64,10 @@ def build_voucher(*, business_name, booking_id, asset_name, when, guests,
         ("Gost / Guest", guest_name or "—"),
         ("Telefon gosta / Phone", guest_phone or "—"),
     ]
+    if pickup_location:
+        rows.append(("Pickup", pickup_location))
+    if transfer_note:
+        rows.append(("Transfer", transfer_note))
     card_top = y + 8 * mm
     card_h = len(rows) * 11 * mm + 6 * mm
     c.setFillColor(light)
@@ -84,23 +90,47 @@ def build_voucher(*, business_name, booking_id, asset_name, when, guests,
     c.setFont(font_bold, 11)
     c.drawString(24 * mm, y - 9 * mm, "POTVRDA / CONFIRMATION")
     c.setFont(font_reg, 9.5)
-    statement = [
-        f"Gost je platio rezervaciju izravno tvrtki {business_name or 'nama'}.",
-        "Partner pruža uslugu (vožnju) u naše ime i NE naplaćuje gostu na licu mjesta.",
-        "The guest has paid the booking to our company. The partner operates the tour",
-        "on our behalf and does NOT charge the guest. Settlement per our agreement.",
-    ]
+    if balance_to_collect and balance_to_collect > 0:
+        statement = [
+            f"Gost je platio depozit {deposit_paid:.2f} {currency} tvrtki {business_name or 'nama'}.",
+            f"Partner NAPLAĆUJE gostu ostatak u gotovini na licu mjesta.",
+            f"Guest paid a deposit to our company. Partner collects the remaining",
+            f"balance below from the guest in cash on site.",
+        ]
+    else:
+        statement = [
+            f"Gost je platio cijelu rezervaciju tvrtki {business_name or 'nama'}.",
+            "Partner pruža uslugu i NE naplaćuje gostu ništa na licu mjesta.",
+            "Guest paid in full to our company. Partner does NOT collect anything",
+            "from the guest on site. Settlement per our agreement.",
+        ]
     yy = y - 16 * mm
     for line in statement:
         c.drawString(24 * mm, yy, line)
         yy -= 6 * mm
 
+    # prominent "TO COLLECT FROM GUEST" box — so the partner knows exactly what to take
+    if balance_to_collect and balance_to_collect > 0:
+        cy = y - box_h - 6 * mm
+        cbox_h = 20 * mm
+        c.setFillColor(gold)
+        c.roundRect(18 * mm, cy - cbox_h, w - 36 * mm, cbox_h, 3 * mm, fill=1, stroke=0)
+        c.setFillColor(teal_dark)
+        c.setFont(font_bold, 12)
+        c.drawString(24 * mm, cy - 8 * mm, "NAPLATITI OD GOSTA / COLLECT FROM GUEST:")
+        c.setFont(font_bold, 18)
+        c.drawRightString(w - 24 * mm, cy - 13 * mm,
+                          f"{balance_to_collect:.2f} {currency}")
+        c.setFont(font_reg, 8)
+        c.drawString(24 * mm, cy - 16 * mm, "u gotovini / in cash")
+        y = cy - cbox_h
+
     # settlement line (internal)
     if settlement_summary:
-        y = y - box_h - 12 * mm
+        y = y - 12 * mm
         c.setFillColor(ink)
         c.setFont(font_bold, 10)
-        c.drawString(20 * mm, y, "Obračun (interno): " )
+        c.drawString(20 * mm, y, "Obračun (interno): ")
         c.setFont(font_reg, 10)
         c.setFillColor(grey)
         c.drawString(20 * mm, y - 6 * mm, settlement_summary)
