@@ -348,12 +348,16 @@ async function bookingModal(){
     <button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
   onAssetPick();
 }
-function onAssetPick(){
+async function onAssetPick(){
   const a = window._assets.find(x=>x.id===+val('b_asset'));
   const sel = document.getElementById('b_pkg');
-  sel.innerHTML = (a.packages||[]).map(p=>
-    `<option value="${p.package_id}" data-dur="${p.duration_minutes}" data-price="${p.price}">
-     ${p.name} — ${money(p.price)}</option>`).join('') || '<option value="">(no packages)</option>';
+  // fetch this asset's real packages (the assets list doesn't include them)
+  let pkgs = [];
+  try{ pkgs = await api('/api/packages/by-asset/'+a.id); }catch(e){ pkgs = []; }
+  window._pkgCache = pkgs;
+  sel.innerHTML = (pkgs||[]).map(p=>
+    `<option value="${p.id}" data-dur="${p.duration_minutes}" data-price="${p.price}">
+     ${p.name} — ${money(p.price)}</option>`).join('') || '<option value="">(nema paketa)</option>';
   onPkgPick();
 }
 function onPkgPick(){
