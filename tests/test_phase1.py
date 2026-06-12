@@ -566,3 +566,44 @@ def test_booking_pickup_and_deposit_fields():
     assert b.deposit_amount == 99.0
     assert b.pickup_location == "Lapadska obala 4, Dubrovnik"
     db.close()
+
+
+def test_edit_deposit_on_booking():
+    from app.core.database import SessionLocal
+    from app.services import booking_service
+    from app.models.customer import Customer
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    c = Customer(full_name="Dep Test", email="dep@x.com")
+    db.add(c); db.commit(); db.refresh(c)
+    start = datetime.now(timezone.utc) + timedelta(days=320)
+    b = booking_service.create_booking(db, 1, c.id, start, start + timedelta(hours=4),
+                                       source="admin")
+    # simulate PATCH editing the deposit
+    b.deposit_amount = 105.0
+    db.commit(); db.refresh(b)
+    assert b.deposit_amount == 105.0
+    db.close()
+
+
+def test_default_deposit_fallback():
+    """A boat with deposit_percent=0 still gets a non-zero deposit via the global default."""
+    from app.core.database import SessionLocal
+    from app.services import booking_service
+    from app.models.customer import Customer
+    from app.models.asset import Asset
+    from app.models.package import RentalPackage
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    a = db.get(Asset, 1)
+    a.deposit_percent = 0
+    db.commit()
+    pkg = db.query(RentalPackage).filter(RentalPackage.asset_id == 1).first()
+    c = Customer(full_name="Dep Fallback", email="df@x.com")
+    db.add(c); db.commit(); db.refresh(c)
+    start = datetime.now(timezone.utc) + timedelta(days=340)
+    b = booking_service.create_booking(db, 1, c.id, start, start + timedelta(hours=4),
+                                       source="admin", package_id=pkg.id)
+    assert b.total_price > 0
+    assert b.deposit_amount > 0  # default % applied, not 0
+    db.close()

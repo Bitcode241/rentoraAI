@@ -206,6 +206,7 @@ function bookingTable(b, full){
     <td><span class="pill">${x.source}</span></td>
     ${full?`<td class="row-actions">${x.status==='pending'?`<button class="btn btn-sm" onclick="confirmB(${x.id})">Confirm</button>`:''}
     ${(x.payment_status!=='deposit_paid')?`<button class="btn btn-sm" onclick="chargeDeposit(${x.id})">Naplati depozit</button>`:''}
+    ${(x.payment_status!=='deposit_paid')?`<button class="btn btn-sm btn-ghost" onclick="editDeposit(${x.id},${x.deposit_amount||0})">Uredi depozit</button>`:''}
     ${(x.payment_status==='deposit_paid')?`<button class="btn btn-sm btn-ghost" onclick="sendConfirm(${x.id})">Pošalji potvrdu</button>`:''}
     ${(x.payment_status==='deposit_paid')?`<button class="btn btn-sm btn-ghost" onclick="refundB(${x.id})">Povrat</button>`:''}
     <button class="btn btn-sm btn-ghost" onclick="openVoucher(${x.id})">Voucher</button>
@@ -379,10 +380,19 @@ async function saveBooking(){
   onPkgPick();
   const sv = val('b_start'), ev = val('b_end');
   if(!sv){ document.getElementById('merr').textContent='Upiši vrijeme početka.'; return; }
+  if(!val('b_pkg')){ document.getElementById('merr').textContent='Odaberi paket (da se cijena i depozit izračunaju).'; return; }
   if(!ev || new Date(ev) <= new Date(sv)){
     document.getElementById('merr').textContent='Odaberi paket (kraj se računa sam) ili upiši kraj nakon početka.';
     return;
   }
+  // upozori ako je brod već zauzet u tom terminu (admin ipak može nastaviti)
+  try{
+    const aid=+val('b_asset');
+    const chk=await api('/api/availability/check?asset_id='+aid+'&start='+encodeURIComponent(new Date(sv).toISOString())+'&end='+encodeURIComponent(new Date(ev).toISOString())).catch(()=>null);
+    if(chk && chk.available===false){
+      if(!confirm('PAŽNJA: ovaj resurs je u tom terminu već zauzet. Svejedno upisati rezervaciju?')) return;
+    }
+  }catch(e){ /* ako provjera ne uspije, ne blokiraj */ }
   try{
     let custId = +val('b_cust') || 0;
     // create a new guest on the fly if no existing customer was picked
@@ -627,9 +637,27 @@ async function chargeDeposit(id){
     if(r.url){
       // otvori Stripe stranicu za plaćanje u novom tabu
       window.open(r.url,'_blank');
+    } else if((r.error||'')==='no_deposit'){
+      // depozit je 0 — ponudi unos pa pokušaj ponovno
+      const v=prompt('Iznos depozita je 0. Upiši iznos depozita (EUR) koji je gost platio/treba platiti:');
+      if(v && +v>0){ await editDeposit(id,+v,true); chargeDeposit(id); }
     } else {
       alert('Greška: '+(r.message||r.error||'nepoznato'));
     }
+  }catch(e){ alert(e.message); }
+}
+
+async function editDeposit(id, current, silent){
+  let v=current;
+  if(!silent){
+    const inp=prompt('Iznos depozita (EUR):', current||'');
+    if(inp===null) return;
+    v=+inp;
+    if(!(v>0)){ alert('Upiši ispravan iznos.'); return; }
+  }
+  try{
+    await api('/api/bookings/'+id,{method:'PATCH',body:JSON.stringify({deposit_amount:v})});
+    if(!silent) go('Bookings');
   }catch(e){ alert(e.message); }
 }
 

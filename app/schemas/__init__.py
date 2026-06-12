@@ -156,6 +156,12 @@ class BookingCreate(BaseModel):
 class BookingUpdate(BaseModel):
     status: Optional[Literal["pending", "confirmed", "cancelled", "completed"]] = None
     notes: Optional[str] = None
+    deposit_amount: Optional[float] = None
+    total_price: Optional[float] = None
+    passengers: Optional[int] = None
+    pickup_location: Optional[str] = None
+    payment_status: Optional[str] = None
+    transfer_note: Optional[str] = None
 
 
 class BookingOut(BaseModel):

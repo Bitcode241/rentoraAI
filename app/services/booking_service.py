@@ -51,6 +51,13 @@ def create_booking(db: Session, asset_id: int, customer_id: int,
     else:
         q = pricing.quote(asset, start, end)
 
+    # Safety net: if the asset has no deposit % set, the quote deposit can be 0.
+    # Fall back to the global default deposit % so we never charge a 0 deposit.
+    if (q.get("deposit_amount") or 0) <= 0 and (q.get("total_price") or 0) > 0:
+        from app.services import settings_service
+        pct = settings_service.default_deposit_percent(db)
+        q["deposit_amount"] = round(q["total_price"] * pct / 100.0, 2)
+
     booking = Booking(
         asset_id=asset_id, customer_id=customer_id,
         start_datetime=start, end_datetime=end,

@@ -9,6 +9,16 @@ from sqlalchemy.orm import Session
 from app.models.app_setting import AppSetting
 
 LEAD_TIME_KEY = "lead_time_hours"
+DEFAULT_DEPOSIT_KEY = "default_deposit_percent"
+
+
+def default_deposit_percent(db: Session, fallback: float = 30.0) -> float:
+    """Global default deposit %, used when an asset has none set (avoids 0 deposit)."""
+    try:
+        v = get(db, DEFAULT_DEPOSIT_KEY, None)
+        return float(v) if v is not None else fallback
+    except (TypeError, ValueError):
+        return fallback
 DEFAULT_LEAD_TIMES = {"jetski": 2, "boat": 8, "transfer": 3}
 
 
