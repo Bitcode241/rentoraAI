@@ -30,7 +30,8 @@ _processing_lock = threading.Lock()
 PRODUCT_KW = [
     "boat", "boats", "jet ski", "jetski", "jet-ski", "yacht", "speedboat",
     "brod", "brodom", "broda", "gliser", "glisera", "skuter", "plovilo",
-    "boot", "boote",
+    "boot", "boote", "barracuda", "atlantic", "gaia", "marine", "yamaha",
+    "tour", "excursion", "izlet", "krstaren", "transfer", "prijevoz",
 ]
 # Rental intent words — only count when a product is ALSO present (or a very
 # strong standalone rental phrase below).
@@ -38,8 +39,12 @@ RENTAL_SIGNAL_KW = [
     "rent", "hire", "charter", "available", "availability", "book a", "booking",
     "reservation", "reserve",
     "najam", "iznajmiti", "iznajmljujete", "rezervacij", "rezervirati",
-    "slobodno", "slobodan", "dostupno", "dostupan", "termin", "cijena", "cijenu",
-    "mieten", "buchen", "verfügbar", "reservierung",
+    "slobodno", "slobodan", "slobodna", "dostupno", "dostupan", "dostupna",
+    "raspoloživ", "raspolozivo", "raspolaze", "raspolažete",
+    "termin", "cijena", "cijenu", "cijene", "kosta", "košta", "koliko",
+    "imate li", "imate", "možete li", "mozete li", "zanima me", "zanima nas",
+    "interested", "interested in", "do you have", "can i", "could i", "would like",
+    "mieten", "buchen", "verfügbar", "reservierung", "preis", "kostet",
 ]
 # Strong standalone phrases that ARE a rental inquiry even without a product word.
 STRONG_REQUEST_KW = [

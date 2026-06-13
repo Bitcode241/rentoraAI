@@ -679,3 +679,14 @@ def test_out_of_service_skipped_in_chain():
     r = chain_service.pick_for_window(db, a, start, end)
     assert r["asset"].id == b.id and r["was_redirected"] is True
     db.close()
+
+
+def test_intent_natural_phrasings():
+    """Natural Croatian/English inquiries are detected as 'request', not 'other'."""
+    from app.ai.email_processor import detect_intent
+    assert detect_intent("zanima me brod barracuda 545 da li je imate raspolozivu") == "request"
+    assert detect_intent("imate li slobodan brod za 6 osoba") == "request"
+    assert detect_intent("Hi do you have a boat available for 4 people") == "request"
+    assert detect_intent("koliko kosta najam glisera") == "request"
+    # plain spam stays 'other'
+    assert detect_intent("Boost your sales with our marketing service") == "other"
