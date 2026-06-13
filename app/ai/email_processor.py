@@ -88,6 +88,18 @@ CANCEL_KW = [
 
 def detect_intent(text: str) -> str:
     t = (text or "").lower()
+    # Marketing / B2B sales pitches often mention "boat/yacht" but are NOT guest
+    # inquiries. If it smells like a sales pitch, treat as 'other' (ignore).
+    SPAM_KW = [
+        "easymls", "mls", "import your listings", "yachting professionals",
+        "boost your sales", "grow your business", "our platform", "our software",
+        "increase your bookings", "list your", "sign up", "free trial",
+        "marketing", "seo", "lead generation", "newsletter", "unsubscribe",
+        "partnership opportunity", "affiliate", "we help businesses",
+        "as a professional in boat", "yacht sales",
+    ]
+    if any(k in t for k in SPAM_KW):
+        return "other"
     # cancellation / confirmation use specific phrases (not single words) so
     # "confirm your email" or "accept terms" no longer trigger.
     if _has_word(t, CANCEL_KW):
@@ -156,7 +168,11 @@ def _maybe_handle_owner_reply(db, sender_email, em, mailbox, manager):
 
     answer = external_service.parse_owner_reply(em.get("body", ""))
     if answer is None:
-        # owner wrote something unclear — leave for human, don't guess
+        # No clear yes/no AND no token referencing the request → this probably
+        # isn't an owner reply at all (e.g. the same person emailing as a guest).
+        # Fall through to normal handling instead of parking it for a human.
+        if not token:
+            return None
         log.info("external_owner_reply_unclear", req_id=req.id, sender=sender_email)
         return {"external_request": req.id, "owner_reply": "unclear",
                 "needs_human": True, "auto_sent": False}

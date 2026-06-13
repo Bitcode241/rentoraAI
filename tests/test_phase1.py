@@ -690,3 +690,13 @@ def test_intent_natural_phrasings():
     assert detect_intent("koliko kosta najam glisera") == "request"
     # plain spam stays 'other'
     assert detect_intent("Boost your sales with our marketing service") == "other"
+
+
+def test_spam_not_treated_as_inquiry():
+    """B2B/marketing pitches that mention boats are ignored, not answered."""
+    from app.ai.email_processor import detect_intent
+    assert detect_intent("yachting professionals use EasyMLS to import your listings") == "other"
+    assert detect_intent("As a professional in boat or yacht sales, increase your bookings") == "other"
+    assert detect_intent("Boost your sales with our marketing platform") == "other"
+    # real inquiry still works
+    assert detect_intent("zanima me brod barracuda 545, imate li raspolozivu") == "request"
