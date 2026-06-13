@@ -42,6 +42,10 @@ class Asset(Base):
     # Group equivalent boats so the chain knows they're interchangeable
     # (e.g. all "Barracuda 545" share model_group="barracuda-545").
     model_group: Mapped[str] = mapped_column(String(64), default="")
+    # Temporary operational stop (breakdown, service, partner pulled it). The boat
+    # stays in the system but is skipped by availability + the chain moves to the
+    # next boat. Different from `active` (which removes it entirely).
+    out_of_service: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

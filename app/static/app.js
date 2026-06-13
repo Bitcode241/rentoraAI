@@ -94,7 +94,7 @@ const RENDER = {
     v.innerHTML = `<div class="toolbar"><button class="btn btn-sm" onclick="assetModal()">+ New asset</button></div>
       <div class="panel"><table><thead><tr><th>Name</th><th>Type</th><th>Cap.</th>
       <th>Packages</th><th>Deposit</th><th>Calendar</th><th>Status</th><th></th></tr></thead>
-      <tbody>${a.map(x=>`<tr><td><b>${x.name}</b>${x.is_external?` <span class="pill" style="background:var(--warn);color:#fff" title="Partnerski brod — ${x.owner_name||'vlasnik'}, ${x.commission_percent||0}% provizija">partner</span>`:''}</td><td><span class="pill">${x.asset_type}</span></td>
+      <tbody>${a.map(x=>`<tr><td><b>${x.name}</b>${x.is_external?` <span class="pill" style="background:var(--warn);color:#fff" title="Partnerski brod — ${x.owner_name||'vlasnik'}, ${x.commission_percent||0}% provizija">partner</span>`:''}${x.out_of_service?` <span class="pill" style="background:#b23b3b;color:#fff">van funkcije</span>`:''}</td><td><span class="pill">${x.asset_type}</span></td>
       <td>${x.capacity}</td>
       <td style="font-size:12px">${(x.packages||[]).map(p=>`${p.name} ${money(p.price)}`).join(' · ')||'—'}</td>
       <td>${x.deposit_percent?x.deposit_percent+'%':money(x.deposit)}</td>
@@ -244,6 +244,10 @@ async function assetModal(id){
     <input id="m_group" value="${a.model_group||''}" placeholder="barracuda-545">
     <label>Prioritet <span style="color:var(--mut);font-size:11px">(manji = prvo se nudi; tvoj brod = 1)</span></label>
     <input id="m_prio" type="number" min="1" value="${a.booking_priority||100}">
+    <label style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer">
+      <input id="m_oos" type="checkbox" ${a.out_of_service?'checked':''} style="width:auto">
+      <span>Van funkcije (kvar/servis) — preskače se i ide na sljedeći brod</span>
+    </label>
     <div style="margin-top:14px;padding:12px;border:1px dashed var(--line);border-radius:6px;background:rgba(15,106,125,.04)">
       <label style="display:flex;align-items:center;gap:8px;font-weight:600;cursor:pointer">
         <input type="checkbox" id="m_ext" ${a.is_external?'checked':''} onchange="document.getElementById('extfields').style.display=this.checked?'block':'none'">
@@ -298,6 +302,7 @@ async function saveAsset(id){
     deposit_percent:+val('m_deppct'),calendar_id:val('m_cal'),location:val('m_loc'),
     page_url:val('m_page'),default_pickup:val('m_pickup'),
     model_group:val('m_group'),booking_priority:+val('m_prio')||100,
+    out_of_service:document.getElementById('m_oos')?document.getElementById('m_oos').checked:false,
     is_external:document.getElementById('m_ext').checked,
     owner_name:val('m_oname'),owner_email:val('m_oemail'),
     owner_phone:val('m_ophone'),commission_percent:+val('m_comm'),

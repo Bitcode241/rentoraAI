@@ -658,3 +658,24 @@ def test_availability_chain_priority():
     r2 = chain_service.pick_for_window(db, a, start, end)
     assert r2["asset"].id == b.id and r2["was_redirected"] is True
     db.close()
+
+
+def test_out_of_service_skipped_in_chain():
+    from app.core.database import SessionLocal
+    from app.services import chain_service
+    from app.models.asset import Asset
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    boats = db.query(Asset).filter(Asset.asset_type == "boat").limit(2).all()
+    a, b = boats[0], boats[1]
+    a.model_group = "grp-oos"; a.booking_priority = 1; a.out_of_service = False
+    b.model_group = "grp-oos"; b.booking_priority = 2; b.out_of_service = False
+    db.commit()
+    start = datetime.now(timezone.utc) + timedelta(days=370, hours=9)
+    end = start + timedelta(hours=4)
+    # mark priority 1 out of service -> chain picks priority 2
+    a.out_of_service = True
+    db.commit()
+    r = chain_service.pick_for_window(db, a, start, end)
+    assert r["asset"].id == b.id and r["was_redirected"] is True
+    db.close()

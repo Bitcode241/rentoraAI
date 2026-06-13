@@ -63,6 +63,7 @@ class AssetBase(BaseModel):
     default_pickup: str = ""
     model_group: str = ""
     booking_priority: int = 100
+    out_of_service: bool = False
     calendar_id: str = ""
     active: bool = True
     # External (partner) asset fields
@@ -95,6 +96,7 @@ class AssetUpdate(BaseModel):
     default_pickup: Optional[str] = None
     model_group: Optional[str] = None
     booking_priority: Optional[int] = None
+    out_of_service: Optional[bool] = None
     calendar_id: Optional[str] = None
     active: Optional[bool] = None
     is_external: Optional[bool] = None

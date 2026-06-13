@@ -36,6 +36,8 @@ def is_asset_available(db: Session, asset: Asset, start: datetime, end: datetime
                        exclude_booking_id: int | None = None) -> bool:
     if not asset.active:
         return False
+    if getattr(asset, "out_of_service", False):
+        return False
     if _db_overlaps(db, asset.id, start, end, exclude_booking_id):
         return False
     if not calendar_service.check_availability(asset.calendar_id, start, end):
@@ -48,6 +50,7 @@ def find_available(db: Session, asset_type: str, passengers: int,
     candidates = db.query(Asset).filter(
         Asset.asset_type == asset_type,
         Asset.active.is_(True),
+        Asset.out_of_service.is_(False),
         Asset.capacity >= passengers,   # Rule 1
     ).all()
 
