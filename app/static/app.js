@@ -104,16 +104,26 @@ const RENDER = {
       ||'<tr><td colspan=8 class="empty">No assets yet</td></tr>'}</tbody></table></div>`;
   },
   'Transfers': async (v)=>{
-    const z = await api('/api/transfers/zones');
-    v.innerHTML = `<div class="toolbar"><button class="btn btn-sm" onclick="zoneModal()">+ New zone</button>
-      <span style="color:var(--mut);font-size:12px">Car ≤3 people · Van 4-8 · Van+Car for 9+ · prices are one-way</span></div>
-      <div class="panel"><table><thead><tr><th>Zone</th><th>Car (≤3)</th><th>Van (4-8)</th><th>Status</th><th></th></tr></thead>
+    const [z, radii] = await Promise.all([api('/api/transfers/zones'), api('/api/transfers/radii')]);
+    v.innerHTML = `<div class="toolbar"><button class="btn btn-sm" onclick="zoneModal()">+ Nova zona (po imenu)</button>
+      <span style="color:var(--mut);font-size:12px">Auto ≤3 · Kombi 4-8 · Kombi+Auto za 9+ · cijene su jednosmjerne</span></div>
+      <div class="panel"><table><thead><tr><th>Zona</th><th>Auto (≤3)</th><th>Kombi (4-8)</th><th>Status</th><th></th></tr></thead>
       <tbody>${z.map(x=>`<tr><td><b>${x.name}</b></td><td>${money(x.car_price)}</td>
       <td>${money(x.van_price)}</td>
       <td>${x.active?'<span class="badge-live">● active</span>':'<span class="badge-off">○ off</span>'}</td>
-      <td class="row-actions"><button class="btn btn-sm btn-ghost" onclick="zoneModal(${x.id})">Edit</button>
-      <button class="btn btn-sm btn-ghost" onclick="delZone(${x.id})">Delete</button></td></tr>`).join('')
-      ||'<tr><td colspan=5 class="empty">No transfer zones yet</td></tr>'}</tbody></table></div>`;
+      <td class="row-actions"><button class="btn btn-sm btn-ghost" onclick="zoneModal(${x.id})">Uredi</button>
+      <button class="btn btn-sm btn-ghost" onclick="delZone(${x.id})">Obriši</button></td></tr>`).join('')
+      ||'<tr><td colspan=5 class="empty">Nema zona</td></tr>'}</tbody></table></div>
+
+      <h3 style="margin:24px 0 8px">GPS cijene po udaljenosti (Ragusa Transfer)</h3>
+      <p style="color:var(--mut);font-size:12px;margin:0 0 8px">Postavi baznu točku i zone po kilometrima. Sustav geokodira lokaciju gosta i primijeni cijenu zone. Izvan svih zona → traži tvoju cijenu.</p>
+      <div class="toolbar"><button class="btn btn-sm" onclick="radiusModal()">+ Nova zona (km)</button></div>
+      <div class="panel"><table><thead><tr><th>Zona</th><th>Bazna točka</th><th>Do (km)</th><th>Auto</th><th>Kombi</th><th></th></tr></thead>
+      <tbody>${radii.map(r=>`<tr><td><b>${r.label||'—'}</b></td><td style="font-size:12px">${r.base_label||'—'}${r.base_lat?` <span style="color:var(--good)">✓ GPS</span>`:' <span style="color:var(--warn)">⚠ nema GPS</span>'}</td>
+      <td>${r.max_km} km</td><td>${money(r.car_price)}</td><td>${money(r.van_price)}</td>
+      <td class="row-actions"><button class="btn btn-sm btn-ghost" onclick="radiusModal(${r.id})">Uredi</button>
+      <button class="btn btn-sm btn-ghost" onclick="delRadius(${r.id})">Obriši</button></td></tr>`).join('')
+      ||'<tr><td colspan=6 class="empty">Nema GPS zona — dodaj prvu</td></tr>'}</tbody></table></div>`;
   },
   'Mail Settings': async (v)=>{
     const boxes = await api('/api/mailboxes');
@@ -479,6 +489,34 @@ async function saveZone(id){
 }
 async function delZone(id){ if(!confirm('Delete this zone?'))return;
   await api('/api/transfers/zones/'+id,{method:'DELETE'}); go('Transfers'); }
+
+async function radiusModal(id){
+  let r = {label:'',base_label:'',max_km:10,car_price:0,van_price:0,service:'transfer'};
+  if(id){ const all = await api('/api/transfers/radii'); r = all.find(x=>x.id===id)||r; }
+  openModal(`<h3>${id?'Uredi':'Nova'} GPS zona</h3>
+    <label>Naziv zone</label><input id="r_label" value="${r.label||''}" placeholder="do 10 km">
+    <label>Bazna točka (adresa) <span style="color:var(--mut);font-size:11px">(npr. Lapadska obala 4, Dubrovnik)</span></label>
+    <input id="r_base" value="${r.base_label||''}" placeholder="Lapadska obala 4, Dubrovnik">
+    <p style="color:var(--mut);font-size:11px;margin:4px 0">GPS koordinate se automatski izračunaju iz adrese kad spremiš.</p>
+    <label>Do udaljenosti (km)</label><input id="r_km" type="number" step="0.5" value="${r.max_km||10}">
+    <label>Cijena auto (≤3 osobe) €</label><input id="r_car" type="number" step="0.01" value="${r.car_price||0}">
+    <label>Cijena kombi (4-8) €</label><input id="r_van" type="number" step="0.01" value="${r.van_price||0}">
+    <div class="err" id="rerr"></div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+    <button class="btn" onclick="saveRadius(${id||0})">Spremi</button>
+    <button class="btn btn-ghost" onclick="closeModal()">Odustani</button></div>`);
+}
+async function saveRadius(id){
+  const body={label:val('r_label'),base_label:val('r_base'),max_km:+val('r_km')||10,
+    car_price:+val('r_car')||0,van_price:+val('r_van')||0,service:'transfer'};
+  try{
+    if(id) await api('/api/transfers/radii/'+id,{method:'PATCH',body:JSON.stringify(body)});
+    else await api('/api/transfers/radii',{method:'POST',body:JSON.stringify(body)});
+    closeModal(); go('Transfers');
+  }catch(e){ document.getElementById('rerr').textContent=e.message; }
+}
+async function delRadius(id){ if(!confirm('Obrisati ovu GPS zonu?'))return;
+  await api('/api/transfers/radii/'+id,{method:'DELETE'}); go('Transfers'); }
 
 
 // ---- Visual calendar (vessels x days) ----
