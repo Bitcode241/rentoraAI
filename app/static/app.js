@@ -166,6 +166,11 @@ const RENDER = {
       <label>Jet ski</label><input id="set_brand_jetski" value="${biz.brand_jetski||''}" placeholder="Jetski Dubrovnik">
       <label>Transferi</label><input id="set_brand_transfer" value="${biz.brand_transfer||''}" placeholder="Ragusa Transfer">
       <label>Zadani depozit (%)</label><input id="set_dep" type="number" min="0" max="100" value="${biz.default_deposit_percent||30}">
+      <label>Boja widgeta (accent)</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="set_accent" type="color" value="${biz.widget_accent||'#0ea5b7'}" style="width:48px;height:38px;padding:2px;cursor:pointer" oninput="document.getElementById('set_accent_hex').value=this.value">
+        <input id="set_accent_hex" value="${biz.widget_accent||'#0ea5b7'}" placeholder="#0ea5b7" style="flex:1" oninput="document.getElementById('set_accent').value=this.value">
+      </div>
       <div style="margin:12px 0 20px"><button class="btn" onclick="saveBusiness()">Spremi brendove</button>
       <span id="biz_msg" style="margin-left:12px;color:var(--good);font-size:13px"></span></div>
       <h3>Minimalno vrijeme rezervacije unaprijed</h3>
@@ -786,6 +791,7 @@ async function saveBusiness(){
       brand_boat:val('set_brand_boat'),
       brand_jetski:val('set_brand_jetski'),
       brand_transfer:val('set_brand_transfer'),
+      widget_accent:document.getElementById('set_accent')?document.getElementById('set_accent').value:val('set_accent_hex'),
       default_deposit_percent:+val('set_dep')||30})});
     const m=document.getElementById('biz_msg'); if(m) m.textContent='Spremljeno ✓';
   }catch(e){ alert(e.message); }

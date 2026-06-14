@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rezervacija</title>
+<style>
+  :root{
+    --accent:#0ea5b7; --accent-dark:#0a8090; --ink:#0f2230; --mut:#6a7e8c;
+    --line:#e3ebef; --bg:#f6f9fb; --card:#ffffff; --good:#1a8a5a;
+    --radius:16px; --shadow:0 6px 24px rgba(16,40,56,.08);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:680px;margin:0 auto;padding:0 16px 120px}
+  /* header */
+  .hero{background:linear-gradient(135deg,var(--accent) 0%,var(--accent-dark) 100%);
+    color:#fff;padding:28px 20px 56px;border-radius:0 0 28px 28px;position:relative;overflow:hidden}
+  .hero::after{content:"";position:absolute;inset:0;background:
+    radial-gradient(120% 80% at 90% -10%,rgba(255,255,255,.18),transparent 60%);pointer-events:none}
+  .hero h1{font-size:24px;font-weight:800;letter-spacing:-.4px;position:relative}
+  .hero p{opacity:.92;font-size:14px;margin-top:4px;position:relative}
+  .hero .biz{font-size:12px;text-transform:uppercase;letter-spacing:1.5px;opacity:.85;font-weight:600}
+  /* stepper */
+  .steps{display:flex;gap:6px;margin:-28px auto 20px;max-width:648px;position:relative;z-index:2;padding:0 4px}
+  .step{flex:1;height:5px;border-radius:99px;background:rgba(255,255,255,.45)}
+  .step.done{background:#fff}
+  .step.active{background:#fff;box-shadow:0 0 0 3px rgba(255,255,255,.3)}
+  /* cards */
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:18px;margin-bottom:14px}
+  .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.8px;color:var(--mut);
+    font-weight:700;margin-bottom:14px}
+  /* asset / package tiles */
+  .tile{border:2px solid var(--line);border-radius:14px;padding:14px;cursor:pointer;
+    transition:all .15s;display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+  .tile:hover{border-color:var(--accent)}
+  .tile.sel{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,#fff)}
+  .tile .t-name{font-weight:700;font-size:15px}
+  .tile .t-sub{font-size:13px;color:var(--mut);margin-top:2px}
+  .tile .t-price{font-weight:800;font-size:16px;white-space:nowrap;color:var(--accent-dark)}
+  .tick{width:22px;height:22px;border-radius:50%;border:2px solid var(--line);flex:none;margin-left:12px;
+    display:grid;place-items:center;font-size:13px;color:#fff}
+  .tile.sel .tick{background:var(--accent);border-color:var(--accent)}
+  /* inputs */
+  label.fl{display:block;font-size:13px;font-weight:600;margin:12px 0 6px}
+  input,select{width:100%;padding:12px 14px;border:1.5px solid var(--line);border-radius:11px;
+    font-size:15px;font-family:inherit;background:#fff;color:var(--ink)}
+  input:focus,select:focus{outline:none;border-color:var(--accent)}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .qty{display:flex;align-items:center;gap:0;border:1.5px solid var(--line);border-radius:11px;overflow:hidden;width:fit-content}
+  .qty button{width:44px;height:44px;border:none;background:#fff;font-size:20px;cursor:pointer;color:var(--accent-dark)}
+  .qty span{min-width:48px;text-align:center;font-weight:700;font-size:16px}
+  /* add-ons */
+  .addon{display:flex;align-items:center;gap:12px;padding:12px;border:1.5px solid var(--line);
+    border-radius:12px;margin-bottom:8px;cursor:pointer;transition:all .15s}
+  .addon.sel{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 6%,#fff)}
+  .addon .box{width:22px;height:22px;border-radius:6px;border:2px solid var(--line);flex:none;
+    display:grid;place-items:center;color:#fff;font-size:13px}
+  .addon.sel .box{background:var(--accent);border-color:var(--accent)}
+  .addon .a-name{font-weight:600;font-size:14px;flex:1}
+  .addon .a-desc{font-size:12px;color:var(--mut);font-weight:400}
+  .addon .a-price{font-weight:700;color:var(--accent-dark);font-size:14px}
+  /* summary bar */
+  .bar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--line);
+    box-shadow:0 -4px 20px rgba(16,40,56,.07);padding:14px 16px;z-index:30}
+  .bar-in{max-width:680px;margin:0 auto;display:flex;align-items:center;gap:14px}
+  .bar .tot{flex:1}
+  .bar .tot .lbl{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
+  .bar .tot .amt{font-size:22px;font-weight:800;letter-spacing:-.5px}
+  .bar .tot .dep{font-size:12px;color:var(--mut)}
+  .btn{background:var(--accent);color:#fff;border:none;padding:15px 26px;border-radius:13px;
+    font-size:16px;font-weight:700;cursor:pointer;transition:all .15s;font-family:inherit;white-space:nowrap}
+  .btn:hover{background:var(--accent-dark)}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btn-wide{width:100%}
+  /* states */
+  .avail{font-size:13px;margin-top:8px;font-weight:600}
+  .avail.ok{color:var(--good)}
+  .avail.no{color:#c0392b}
+  .muted{color:var(--mut);font-size:13px}
+  .center{text-align:center;padding:40px 20px}
+  .spinner{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--accent);
+    border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 14px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .hide{display:none!important}
+  .success{text-align:center;padding:30px 20px}
+  .success .ico{width:64px;height:64px;border-radius:50%;background:var(--good);color:#fff;
+    display:grid;place-items:center;font-size:32px;margin:0 auto 16px}
+  .powered{text-align:center;font-size:11px;color:var(--mut);padding:16px;opacity:.7}
+  .powered b{color:var(--accent-dark)}
+</style>
+</head>
+<body>
+  <div class="hero">
+    <div class="biz" id="biz">—</div>
+    <h1 id="title">Rezerviraj online</h1>
+    <p>Odaberi, plati depozit, gotovo. Ostatak na licu mjesta.</p>
+  </div>
+  <div class="steps" id="steps">
+    <div class="step active"></div><div class="step"></div>
+    <div class="step"></div><div class="step"></div>
+  </div>
+
+  <div class="wrap">
+    <div id="loading" class="center"><div class="spinner"></div><div class="muted">Učitavam…</div></div>
+
+    <div id="app" class="hide">
+      <!-- step 1: asset -->
+      <div class="card" id="s-asset">
+        <h2>1 · Odaberi</h2>
+        <div id="assets"></div>
+      </div>
+      <!-- step 2: package + when + people -->
+      <div class="card hide" id="s-pkg">
+        <h2>2 · Paket i termin</h2>
+        <div id="packages"></div>
+        <div class="row2" style="margin-top:6px">
+          <div><label class="fl">Datum</label><input type="date" id="date"></div>
+          <div><label class="fl">Vrijeme</label><input type="time" id="time" value="09:00"></div>
+        </div>
+        <label class="fl">Broj osoba</label>
+        <div class="qty">
+          <button onclick="chPax(-1)">−</button><span id="pax">1</span><button onclick="chPax(1)">+</button>
+        </div>
+        <div class="avail" id="avail"></div>
+      </div>
+      <!-- step 3: add-ons -->
+      <div class="card hide" id="s-addons">
+        <h2>3 · Dodaci (nije obavezno)</h2>
+        <div id="addons"></div>
+      </div>
+      <!-- step 4: details -->
+      <div class="card hide" id="s-details">
+        <h2>4 · Tvoji podaci</h2>
+        <label class="fl">Ime i prezime</label><input id="g_name" placeholder="Ivan Horvat">
+        <label class="fl">Email</label><input id="g_email" type="email" placeholder="ivan@email.com">
+        <label class="fl">Telefon (WhatsApp/Viber)</label><input id="g_phone" placeholder="+385 …">
+        <div class="avail no hide" id="err" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+    <div id="done" class="hide"></div>
+    <div class="powered">Powered by <b>Rentora</b></div>
+  </div>
+
+  <!-- sticky summary bar -->
+  <div class="bar hide" id="bar">
+    <div class="bar-in">
+      <div class="tot">
+        <div class="lbl">Ukupno</div>
+        <div class="amt" id="bar-amt">—</div>
+        <div class="dep" id="bar-dep"></div>
+      </div>
+      <button class="btn" id="bar-btn" onclick="next()">Dalje</button>
+    </div>
+  </div>
+
+<script>
+const TYPE = location.pathname.split('/').pop() || 'jetski';
+const API = '/api/public';
+let CFG={}, ASSETS=[], ADDONS=[], S={asset:null,pkg:null,pax:1,addons:new Set(),step:1,avail:null};
+
+const money=n=>new Intl.NumberFormat('hr-HR',{style:'currency',currency:CFG.currency||'EUR',maximumFractionDigits:0}).format(n||0);
+const $=id=>document.getElementById(id);
+
+async function init(){
+  try{
+    [CFG, ASSETS, ADDONS] = await Promise.all([
+      fetch(`${API}/config?asset_type=${TYPE}`).then(r=>r.json()),
+      fetch(`${API}/assets?asset_type=${TYPE}`).then(r=>r.json()),
+      fetch(`${API}/addons?asset_type=${TYPE}`).then(r=>r.json()),
+    ]);
+    applyTheme();
+    $('biz').textContent = CFG.business_name||'';
+    $('loading').classList.add('hide'); $('app').classList.remove('hide'); $('bar').classList.remove('hide');
+    renderAssets();
+    // default date = tomorrow
+    const d=new Date(Date.now()+864e5); $('date').value=d.toISOString().slice(0,10);
+    $('date').min=new Date().toISOString().slice(0,10);
+    ['date','time'].forEach(id=>$(id).addEventListener('change',checkAvail));
+    updateBar();
+  }catch(e){ $('loading').innerHTML='<div class="muted">Greška pri učitavanju. Pokušaj ponovno.</div>'; }
+}
+function applyTheme(){
+  const a=CFG.accent||'#0ea5b7';
+  document.documentElement.style.setProperty('--accent',a);
+  document.documentElement.style.setProperty('--accent-dark',shade(a,-18));
+}
+function shade(hex,p){const n=parseInt(hex.slice(1),16);let r=(n>>16)+p*2.55,g=(n>>8&255)+p*2.55,b=(n&255)+p*2.55;
+  r=Math.max(0,Math.min(255,r));g=Math.max(0,Math.min(255,g));b=Math.max(0,Math.min(255,b));
+  return '#'+(1<<24|r<<16|g<<8|b).toString(16).slice(1);}
+
+function renderAssets(){
+  $('assets').innerHTML = ASSETS.map(a=>{
+    const from = a.packages.length?Math.min(...a.packages.map(p=>p.price)):0;
+    return `<div class="tile ${S.asset&&S.asset.id===a.id?'sel':''}" onclick="pickAsset(${a.id})">
+      <div><div class="t-name">${a.name}</div>
+      <div class="t-sub">do ${a.capacity} osoba${a.description&&a.description!==a.name?' · '+a.description:''}</div></div>
+      <div style="display:flex;align-items:center">
+      <div class="t-price">od ${money(from)}</div>
+      <div class="tick">${S.asset&&S.asset.id===a.id?'✓':''}</div></div>
+    </div>`;
+  }).join('') || '<div class="muted">Trenutno nema dostupnih jedinica.</div>';
+}
+function pickAsset(id){
+  S.asset=ASSETS.find(a=>a.id===id); S.pkg=null; S.avail=null;
+  renderAssets(); renderPackages();
+  $('s-pkg').classList.remove('hide'); setStep(2);
+  $('s-pkg').scrollIntoView({behavior:'smooth',block:'start'});
+  updateBar();
+}
+function renderPackages(){
+  $('packages').innerHTML = S.asset.packages.map(p=>`
+    <div class="tile ${S.pkg&&S.pkg.id===p.id?'sel':''}" onclick="pickPkg(${p.id})">
+      <div><div class="t-name">${p.name}</div>
+      <div class="t-sub">${p.duration_minutes} min · depozit ${money(p.deposit)}</div></div>
+      <div style="display:flex;align-items:center">
+      <div class="t-price">${money(p.price)}</div>
+      <div class="tick">${S.pkg&&S.pkg.id===p.id?'✓':''}</div></div>
+    </div>`).join('');
+}
+function pickPkg(id){ S.pkg=S.asset.packages.find(p=>p.id===id); renderPackages(); checkAvail(); updateBar(); }
+function chPax(d){ S.pax=Math.max(1,Math.min(S.asset?S.asset.capacity:8,S.pax+d)); $('pax').textContent=S.pax; renderAddons(); updateBar(); }
+
+async function checkAvail(){
+  if(!S.asset||!S.pkg||!$('date').value){return;}
+  const start=`${$('date').value}T${$('time').value||'09:00'}:00`;
+  $('avail').textContent='Provjeravam…'; $('avail').className='avail muted';
+  try{
+    const r=await fetch(`${API}/availability?asset_id=${S.asset.id}&package_id=${S.pkg.id}&start=${encodeURIComponent(start)}`).then(x=>x.json());
+    S.avail=r.available;
+    $('avail').textContent = r.available?'✓ Slobodno za odabrani termin':'✗ Zauzeto — probaj drugi termin';
+    $('avail').className = 'avail '+(r.available?'ok':'no');
+  }catch(e){ S.avail=null; $('avail').textContent=''; }
+  updateBar();
+}
+
+function renderAddons(){
+  if(!ADDONS.length){ $('addons').innerHTML='<div class="muted">Nema dodataka.</div>'; return; }
+  $('addons').innerHTML = ADDONS.map(a=>{
+    const price = a.per_person ? a.price*S.pax : a.price;
+    return `<div class="addon ${S.addons.has(a.id)?'sel':''}" onclick="toggleAddon(${a.id})">
+      <div class="box">${S.addons.has(a.id)?'✓':''}</div>
+      <div class="a-name">${a.name}${a.description?`<div class="a-desc">${a.description}</div>`:''}
+      ${a.per_person?'<div class="a-desc">po osobi</div>':''}</div>
+      <div class="a-price">+${money(price)}</div>
+    </div>`;
+  }).join('');
+}
+function toggleAddon(id){ S.addons.has(id)?S.addons.delete(id):S.addons.add(id); renderAddons(); updateBar(); }
+
+function addonsTotal(){
+  let t=0; ADDONS.forEach(a=>{ if(S.addons.has(a.id)) t+=a.per_person?a.price*S.pax:a.price; }); return t;
+}
+function total(){ return (S.pkg?S.pkg.price:0)+addonsTotal(); }
+function deposit(){ return S.pkg?S.pkg.deposit:0; }
+
+function updateBar(){
+  $('bar-amt').textContent = money(total());
+  $('bar-dep').textContent = S.pkg?`Sada platiš depozit ${money(deposit())} · ostatak na licu mjesta`:'';
+  const btn=$('bar-btn');
+  if(S.step===1){ btn.textContent='Dalje'; btn.disabled=!S.asset; }
+  else if(S.step===2){ btn.textContent='Dalje'; btn.disabled=!(S.pkg&&S.avail===true); }
+  else if(S.step===3){ btn.textContent='Dalje'; btn.disabled=false; }
+  else if(S.step===4){ btn.textContent='Plati depozit'; btn.disabled=false; }
+}
+function setStep(n){ S.step=n;
+  document.querySelectorAll('.step').forEach((el,i)=>{el.className='step'+(i<n-1?' done':i===n-1?' active':'');});
+  updateBar();
+}
+function next(){
+  if(S.step===1){ if(!S.asset)return; S.step=2; $('s-pkg').classList.remove('hide'); setStep(2);
+    $('s-pkg').scrollIntoView({behavior:'smooth'}); }
+  else if(S.step===2){ if(!(S.pkg&&S.avail===true))return; renderAddons();
+    $('s-addons').classList.remove('hide'); setStep(3); $('s-addons').scrollIntoView({behavior:'smooth'}); }
+  else if(S.step===3){ $('s-details').classList.remove('hide'); setStep(4);
+    $('s-details').scrollIntoView({behavior:'smooth'}); }
+  else if(S.step===4){ submit(); }
+}
+
+async function submit(){
+  const name=$('g_name').value.trim(), email=$('g_email').value.trim(), phone=$('g_phone').value.trim();
+  $('err').classList.add('hide');
+  if(!email||!email.includes('@')){ showErr('Upiši ispravan email.'); return; }
+  if(!name){ showErr('Upiši ime i prezime.'); return; }
+  const btn=$('bar-btn'); btn.disabled=true; btn.textContent='Pripremam…';
+  const start=`${$('date').value}T${$('time').value||'09:00'}:00`;
+  try{
+    const r=await fetch(`${API}/book`,{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({asset_id:S.asset.id,package_id:S.pkg.id,start,passengers:S.pax,
+        name,email,phone,addon_ids:[...S.addons]})}).then(x=>x.json());
+    if(r.checkout_url){ window.location.href=r.checkout_url; }
+    else if(r.error==='not_available'){ showErr('Termin je upravo zauzet. Odaberi drugi.'); reset(); }
+    else { showErr('Nešto je pošlo po zlu. Pokušaj ponovno.'); btn.disabled=false; btn.textContent='Plati depozit'; }
+  }catch(e){ showErr('Greška u mreži. Pokušaj ponovno.'); btn.disabled=false; btn.textContent='Plati depozit'; }
+}
+function showErr(m){ $('err').textContent=m; $('err').classList.remove('hide'); }
+function reset(){ const b=$('bar-btn'); b.disabled=false; b.textContent='Plati depozit'; }
+
+init();
+</script>
+</body>
+</html>

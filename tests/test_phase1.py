@@ -918,3 +918,31 @@ def test_public_booking_api():
     assert len(assets) >= 1 and "packages" in assets[0]
     # public endpoints must NOT require auth (200, not 401)
     assert c.get("/api/public/addons?asset_type=jetski").status_code == 200
+
+
+def test_widget_page_and_booking_with_addon():
+    from app.main import app
+    from fastapi.testclient import TestClient
+    from app.core.database import SessionLocal
+    from app.models.addon import AddOn
+    from app.models.booking import Booking
+    from datetime import datetime, timedelta
+    c = TestClient(app)
+    # widget page serves
+    assert c.get("/book/jetski").status_code == 200
+    db = SessionLocal()
+    db.add(AddOn(name="GoPro", price=25, applies_to="jetski")); db.commit()
+    addon = db.query(AddOn).filter(AddOn.name == "GoPro").first()
+    assets = c.get("/api/public/assets?asset_type=jetski").json()
+    jet = assets[0]; pkg = jet["packages"][0]
+    start = (datetime.now() + timedelta(days=5)).strftime("%Y-%m-%dT09:00:00")
+    r = c.post("/api/public/book", json={
+        "asset_id": jet["id"], "package_id": pkg["id"], "start": start,
+        "passengers": 2, "name": "T", "email": "w@x.com", "phone": "+385",
+        "addon_ids": [addon.id]}).json()
+    # booking is created and the add-on is folded into the total
+    bid = r.get("booking_id")
+    assert bid
+    b = db.get(Booking, bid)
+    assert b.total_price == pkg["price"] + 25
+    db.close()

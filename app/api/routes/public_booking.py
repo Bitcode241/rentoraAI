@@ -6,6 +6,7 @@ Rate-limited to prevent abuse. Never exposes admin data.
 """
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -163,3 +164,14 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
              addons=addon_names, addons_total=addons_total)
     return {"ok": True, "booking_id": booking.id, "checkout_url": pay["url"],
             "deposit": booking.deposit_amount, "total": booking.total_price}
+
+
+# Serve the widget page itself. Embed on any site via link or iframe:
+#   https://app.rentoraai.com/book/jetski
+from fastapi import APIRouter as _AR
+widget_router = _AR(tags=["widget"])
+
+
+@widget_router.get("/book/{asset_type}")
+def widget_page(asset_type: str):
+    return FileResponse("app/static/widget.html", media_type="text/html")

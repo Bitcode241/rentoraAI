@@ -53,6 +53,7 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 for r in (auth, assets, customers, bookings, availability, messages,
           emails, reports, webhooks, dashboard, packages, transfers, calendar, mailboxes, payments, settings_routes, addons, public_booking):
     app.include_router(r.router)
+app.include_router(public_booking.widget_router)
 
 
 @app.get("/")
