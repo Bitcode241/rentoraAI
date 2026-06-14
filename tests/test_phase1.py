@@ -807,3 +807,17 @@ def test_inquiry_asks_owner_immediately_when_only_partner_free():
                               customer_id=c.id, guest_mailbox="info@x.com")
     assert r2 is None
     db.close()
+
+
+def test_match_handles_croatian_cases():
+    """Boat is matched even with Croatian case endings (barracudu/barracude)."""
+    from app.core.database import SessionLocal
+    from app.services.auto_deposit_service import _match_asset
+    from app.models.asset import Asset
+    db = SessionLocal()
+    cands = db.query(Asset).filter(Asset.asset_type == "boat").all()
+    bar = next((a for a in cands if "barracuda" in a.name.lower()), None)
+    assert bar is not None
+    assert _match_asset("imate li barracudu 545 slobodnu", cands).id == bar.id
+    assert _match_asset("zanima me barracude 545", cands).id == bar.id
+    db.close()

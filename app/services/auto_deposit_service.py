@@ -118,6 +118,34 @@ def _pick_package(asset, full_day: bool):
     return chosen.get("package_id"), chosen
 
 
+def _match_asset(text, candidates):
+    """Find the boat a guest named in free text, tolerant of Croatian case endings
+    (barracuda -> barracudu/barracude) and the '(1)/(2)' suffix. Returns asset or None."""
+    import re as _re
+    t = (text or "").lower()
+    msg_words = _re.findall(r"[a-zšđčćž0-9]+", t)
+    best = None
+    for a in candidates:
+        name = a.name.lower()
+        base = _re.sub(r"\s*\(\d+\)\s*$", "", name).strip()
+        group = (getattr(a, "model_group", "") or "").lower().replace("-", " ")
+        keys = [k for k in (name, base, group) if k]
+        matched_len = 0
+        for k in keys:
+            if k in t:
+                matched_len = max(matched_len, len(k))
+                continue
+            kw = [w for w in _re.findall(r"[a-zšđčćž0-9]+", k) if len(w) > 2]
+            if kw and all(
+                any(mw == w or mw.startswith(w[:max(4, len(w) - 2)]) or
+                    w.startswith(mw[:max(4, len(mw) - 2)]) for mw in msg_words)
+                for w in kw):
+                matched_len = max(matched_len, len(k))
+        if matched_len and (best is None or matched_len > best[0]):
+            best = (matched_len, a)
+    return best[1] if best else None
+
+
 def try_inquiry_chain(db: Session, conversation_text: str, latest_message: str,
                       customer_id: int, guest_mailbox: str = "") -> dict | None:
     """On the FIRST inquiry (no payment intent needed): if the guest named a
@@ -130,22 +158,8 @@ def try_inquiry_chain(db: Session, conversation_text: str, latest_message: str,
     from app.services import chain_service
     candidates = db.query(Asset).filter(Asset.active.is_(True)).all()
 
-    def _match(text):
-        t = (text or "").lower()
-        best = None
-        import re as _re
-        for a in candidates:
-            name = a.name.lower()
-            base = _re.sub(r"\s*\(\d+\)\s*$", "", name).strip()
-            group = (getattr(a, "model_group", "") or "").lower().replace("-", " ")
-            keys = [k for k in (name, base, group) if k]
-            if any(k in t for k in keys):
-                score = max(len(k) for k in keys if k in t)
-                if best is None or score > best[0]:
-                    best = (score, a)
-        return best[1] if best else None
-
-    asset = _match(latest_message) or _match(conversation_text)
+    asset = _match_asset(latest_message, candidates) or \
+        _match_asset(conversation_text, candidates)
     if not asset:
         return None
     start = _parse_date(conversation_text)
@@ -196,22 +210,7 @@ def try_auto_deposit(db: Session, conversation_text: str, latest_message: str,
     candidates = db.query(Asset).filter(Asset.active.is_(True)).all()
 
     def _match(text):
-        t = (text or "").lower()
-        best = None
-        import re as _re
-        for a in candidates:
-            name = a.name.lower()
-            # also match the name without a trailing "(1)"/"(2)" suffix and the
-            # model_group, so "barracuda 545" matches "Barracuda 545 (1)".
-            base = _re.sub(r"\s*\(\d+\)\s*$", "", name).strip()
-            group = (getattr(a, "model_group", "") or "").lower().replace("-", " ")
-            keys = [k for k in (name, base, group) if k]
-            if any(k in t for k in keys):
-                # prefer the most specific (longest) matched key
-                score = max(len(k) for k in keys if k in t)
-                if best is None or score > best[0]:
-                    best = (score, a)
-        return best[1] if best else None
+        return _match_asset(text, candidates)
 
     asset = _match(latest_message) or _match(conversation_text)
     if not asset:
