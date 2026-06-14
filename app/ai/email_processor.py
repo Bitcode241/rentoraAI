@@ -332,6 +332,24 @@ def _process_unread_inner(db: Session, max_results: int = 10) -> list:
                               .first())
         intent = detect_intent(em.get("subject", "") + " " + em.get("body", ""))
 
+        # Fallback thread match: a reply whose headers we couldn't match (e.g. some
+        # iPhone/Gmail replies) should still continue the guest's MOST RECENT thread
+        # rather than starting a fresh one — otherwise the boat/date from the offer
+        # is lost. Only do this when the message looks like a reply (has refs OR
+        # quotes our previous mail), to avoid merging genuinely separate inquiries.
+        if not thread:
+            looks_like_reply = bool(refs) or ("wrote:" in (em.get("body", "") or "").lower()) \
+                or ("> on " in (em.get("body", "") or "").lower()) \
+                or (em.get("subject", "").lower().startswith("re:"))
+            if looks_like_reply:
+                recent = (db.query(EmailThread)
+                          .filter(EmailThread.customer_id == customer.id)
+                          .order_by(EmailThread.id.desc()).first())
+                if recent:
+                    thread = recent
+                    log.info("thread_reattached_by_recency",
+                             thread_id=recent.id, sender=sender_email)
+
         # SAFETY FILTER (before any AI call): reply ONLY to genuine rental
         # inquiries. System/automated senders and non-rental mail are left
         # completely untouched for the owner — no reply, no wasted AI call.

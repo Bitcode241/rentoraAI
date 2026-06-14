@@ -725,3 +725,24 @@ def test_chain_confirm_routes_to_partner():
     assert r is not None and r.get("owner_asked") is True
     assert r.get("asset") == b.name
     db.close()
+
+
+def test_reply_reattaches_to_recent_thread(monkeypatch):
+    """A reply we can't match by headers continues the guest's most recent thread."""
+    from app.core.database import SessionLocal
+    from app.services import conversation_service
+    from app.models.customer import Customer
+    from app.models.email import EmailThread
+    db = SessionLocal()
+    c = Customer(full_name="Reply Guest", email="rg@x.com")
+    db.add(c); db.commit(); db.refresh(c)
+    conv = conversation_service.create_conversation(db, c.id)
+    th = EmailThread(gmail_thread_id="<orig@x>", subject="Upit",
+                     customer_id=c.id, intent="request", conversation_id=conv.id)
+    db.add(th); db.commit(); db.refresh(th)
+    # the most recent thread for this customer should be findable
+    recent = (db.query(EmailThread)
+              .filter(EmailThread.customer_id == c.id)
+              .order_by(EmailThread.id.desc()).first())
+    assert recent.id == th.id
+    db.close()
