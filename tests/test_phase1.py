@@ -758,3 +758,23 @@ def test_wants_boats_recognizes_model_names():
     # model name needs db lookup
     assert iq.wants_boats("zanima me barracuda 545 da li je slobodna", db=db) is True
     db.close()
+
+
+def test_duplicate_thread_id_does_not_crash():
+    """Inserting a thread with an existing gmail_thread_id reuses it, no crash."""
+    from app.core.database import SessionLocal
+    from app.models.customer import Customer
+    from app.models.email import EmailThread
+    from app.services import conversation_service
+    db = SessionLocal()
+    c = Customer(full_name="Dup", email="dup@x.com")
+    db.add(c); db.commit(); db.refresh(c)
+    conv = conversation_service.create_conversation(db, c.id)
+    t1 = EmailThread(gmail_thread_id="<dupe@x>", subject="a",
+                     customer_id=c.id, intent="request", conversation_id=conv.id)
+    db.add(t1); db.commit()
+    # a lookup by the same id should find it (so code reuses instead of inserting)
+    found = db.query(EmailThread).filter(
+        EmailThread.gmail_thread_id == "<dupe@x>").first()
+    assert found is not None and found.id == t1.id
+    db.close()

@@ -232,15 +232,27 @@ def _maybe_handle_owner_reply(db, sender_email, em, mailbox, manager):
 
     split = external_service.commission_split(req.quoted_price,
                                               asset.commission_percent)
-    # notify guest (from the mailbox they used)
+    # Owner said YES → send the guest the DEPOSIT LINK immediately, so you don't
+    # have to do anything. One step: owner confirms, guest pays.
+    from app.services import payment_service
+    from app.ai.agent import _deposit_reply
+    from app.core.timeutil import fmt_local
+    pay = payment_service.create_deposit_checkout(
+        booking, asset.name, guest_email=req.guest_email or "")
+    when = fmt_local(req.start_datetime)
     if manager and guest and guest.email:
-        when = req.start_datetime.strftime("%d.%m.%Y %H:%M")
+        if pay.get("url"):
+            body = _deposit_reply(guest.language or "hr", {
+                "asset_name": asset.name, "when": when,
+                "deposit_amount": booking.deposit_amount,
+                "total_price": booking.total_price,
+                "payment_url": pay["url"]})
+        else:
+            # Stripe couldn't make a link (e.g. deposit 0) — confirm and flag you.
+            body = (f"Pozdrav,\n\nVaš termin za {asset.name} ({when}) je potvrđen!\n"
+                    f"Uskoro šaljem detalje za uplatu.\n\nLijep pozdrav")
         manager.reply_from(req.guest_mailbox or mailbox, guest.email,
-                           "Re: Potvrda rezervacije",
-                           f"Pozdrav,\n\nVaš termin je potvrđen!\n\n"
-                           f"Plovilo: {asset.name}\nTermin: {when}\n"
-                           f"Cijena: {split['guest_pays']} EUR\n\n"
-                           f"Uskoro šaljem detalje za dovršetak rezervacije.\n\nLijep pozdrav")
+                           "Re: Potvrda rezervacije", body)
     # notify the business owner (you) — to the mailbox that received it
     if manager:
         manager.reply_from(mailbox, mailbox,
@@ -250,8 +262,10 @@ def _maybe_handle_owner_reply(db, sender_email, em, mailbox, manager):
                            f"Cijena gostu: {split['guest_pays']} EUR\n"
                            f"Tvoja provizija: {split['your_commission']} EUR\n"
                            f"Vlasniku ide: {split['owner_gets']} EUR\n"
+                           f"Link gostu poslan: {'DA' if pay.get('url') else 'NE — provjeri depozit'}\n"
                            f"Booking #{booking.id}")
-    log.info("external_confirmed", req_id=req.id, booking_id=booking.id)
+    log.info("external_confirmed", req_id=req.id, booking_id=booking.id,
+             link_sent=bool(pay.get("url")))
     return {"external_request": req.id, "owner_reply": "yes",
             "booking_id": booking.id, "needs_human": False, "auto_sent": True}
 
@@ -283,6 +297,7 @@ def _process_unread_inner(db: Session, max_results: int = 10) -> list:
         own_addresses = set()
 
     for em in inbox:
+      try:
         sender_email = em.get("from_email") or _extract_email(em.get("from", ""))
         mailbox = em.get("mailbox", "")   # which of our addresses received it
 
@@ -384,15 +399,32 @@ def _process_unread_inner(db: Session, max_results: int = 10) -> list:
             log.info("email_followup_known_guest", sender=sender_email)
 
         if not thread:
-            # brand-new inquiry -> its own thread AND its own conversation
-            conv = conversation_service.create_conversation(db, customer.id)
-            thread = EmailThread(gmail_thread_id=em.get("message_id") or em.get("id"),
-                                 subject=em.get("subject", ""),
-                                 customer_id=customer.id, intent=intent,
-                                 conversation_id=conv.id)
-            db.add(thread)
-            db.commit()
-            db.refresh(thread)
+            # Guard against a duplicate gmail_thread_id (same message seen twice,
+            # or a reply whose id we already stored) — reuse instead of crashing.
+            tid = em.get("message_id") or em.get("id")
+            if tid:
+                existing = (db.query(EmailThread)
+                            .filter(EmailThread.gmail_thread_id == tid).first())
+                if existing:
+                    thread = existing
+            if not thread:
+                # brand-new inquiry -> its own thread AND its own conversation
+                conv = conversation_service.create_conversation(db, customer.id)
+                thread = EmailThread(gmail_thread_id=tid,
+                                     subject=em.get("subject", ""),
+                                     customer_id=customer.id, intent=intent,
+                                     conversation_id=conv.id)
+                db.add(thread)
+                try:
+                    db.commit()
+                    db.refresh(thread)
+                except Exception:
+                    # Another concurrent insert won the race — roll back and reuse.
+                    db.rollback()
+                    thread = (db.query(EmailThread)
+                              .filter(EmailThread.gmail_thread_id == tid).first())
+                    if not thread:
+                        raise
         conv_id = thread.conversation_id
         if not conv_id:
             # legacy thread without a conversation yet — attach one
@@ -503,5 +535,10 @@ def _process_unread_inner(db: Session, max_results: int = 10) -> list:
                           "mailbox": mailbox,
                           "needs_human": result["needs_human"],
                           "auto_sent": bool(auto)})
+      except Exception as _e:
+        db.rollback()
+        log.warning("email_item_failed", error=str(_e),
+                    sender=em.get("from", ""))
+        continue
     log.info("emails_processed", count=len(processed))
     return processed
