@@ -86,6 +86,24 @@ CANCEL_KW = [
 ]
 
 
+def _detect_language(text: str, fallback: str = "en") -> str:
+    """Guess the guest's language from their message so we reply in the same one.
+    Lightweight keyword check for Croatian and German; defaults to English."""
+    t = (text or "").lower()
+    hr = ["pozdrav", "molim", "hvala", "zanima", "imate", "slobod", "brod",
+          "može", "trebam", "želim", "koliko", "cijena", "dostupno", "lijep pozdrav",
+          "osoba", "ljudi", "termin", "rezervacij", "najam"]
+    de = ["hallo", "guten", "danke", "bitte", "verfügbar", "boot", "ich möchte",
+          "buchen", "preis", "kostet", "personen", "mieten", "grüße"]
+    hr_hits = sum(1 for w in hr if w in t)
+    de_hits = sum(1 for w in de if w in t)
+    if hr_hits >= 1 and hr_hits >= de_hits:
+        return "hr"
+    if de_hits >= 1:
+        return "de"
+    return fallback or "en"
+
+
 def _checking_reply(language: str) -> str:
     """Professional 'we're checking availability' message. Used when the chosen
     boat is a partner boat and we've asked the owner in the background — the guest
@@ -381,6 +399,13 @@ def _process_unread_inner(db: Session, max_results: int = 10) -> list:
         # upgrade it so confirmations show a proper name.
         if sender_name and customer.full_name in ("", sender_email):
             customer.full_name = sender_name
+            db.commit()
+
+        # Reply in the language the guest actually wrote in (don't get stuck on a
+        # stale stored language). Update it when we can tell.
+        _lang = _detect_language(em.get("body", ""), fallback=customer.language or "en")
+        if _lang and _lang != customer.language:
+            customer.language = _lang
             db.commit()
 
         # --- THREAD RESOLUTION (judge same-thread vs new inquiry) ---

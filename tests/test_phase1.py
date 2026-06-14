@@ -846,3 +846,32 @@ def test_inquiry_chain_passes_package_so_deposit_works():
            .order_by(external_service.ExternalRequest.id.desc()).first())
     assert req.package_id and req.package_id > 0
     db.close()
+
+
+def test_language_detection():
+    from app.ai.email_processor import _detect_language
+    assert _detect_language("pozdrav zanima me brod za 3 osobe") == "hr"
+    assert _detect_language("hallo ich möchte ein boot mieten") == "de"
+    assert _detect_language("hello do you have a boat") == "en"
+
+
+def test_transfer_radius_pricing(monkeypatch):
+    """GPS radius pricing: known tier -> price; beyond/unknown -> ask owner."""
+    from app.core.database import SessionLocal
+    from app.models.transfer import TransferRadius
+    from app.services import geo_service
+    db = SessionLocal()
+    for lbl, km, car, van in [("do 10", 10, 30, 45), ("do 20", 20, 50, 70)]:
+        db.add(TransferRadius(label=lbl, base_label="Lapad", base_lat=42.658,
+                              base_lng=18.077, max_km=km, car_price=car,
+                              van_price=van, service="transfer"))
+    db.commit()
+    # ~5 km away -> first tier, 1 car
+    monkeypatch.setattr(geo_service, "geocode", lambda loc: (42.70, 18.077))
+    r = geo_service.price_for_location(db, "Babin kuk", passengers=2)
+    assert r["status"] == "ok" and r["price"] == 30.0
+    # geocode fails -> needs owner price, never invents
+    monkeypatch.setattr(geo_service, "geocode", lambda loc: None)
+    r2 = geo_service.price_for_location(db, "???", passengers=2)
+    assert r2["status"] == "needs_owner_price"
+    db.close()
