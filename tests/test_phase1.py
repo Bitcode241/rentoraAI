@@ -700,3 +700,28 @@ def test_spam_not_treated_as_inquiry():
     assert detect_intent("Boost your sales with our marketing platform") == "other"
     # real inquiry still works
     assert detect_intent("zanima me brod barracuda 545, imate li raspolozivu") == "request"
+
+
+def test_chain_confirm_routes_to_partner():
+    """Guest confirms a model whose top boat is out of service -> partner gets asked."""
+    from app.core.database import SessionLocal
+    from app.services import auto_deposit_service as ad
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    db = SessionLocal()
+    bs = db.query(Asset).filter(Asset.asset_type == "boat").limit(2).all()
+    a, b = bs[0], bs[1]
+    a.model_group = "grp-confirm"; a.booking_priority = 1; a.out_of_service = True
+    b.model_group = "grp-confirm"; b.booking_priority = 2
+    b.is_external = True; b.owner_name = "P"; b.owner_email = "p@x.com"
+    db.commit()
+    c = Customer(full_name="G", email="gg@x.com", phone="+38599")
+    db.add(c); db.commit(); db.refresh(c)
+    base = a.name.lower().split(" (")[0]
+    convo = f"zanima me {base} za 3 osobe 17.8.2026\nmoze rezerviraj taj brod"
+    r = ad.try_auto_deposit(db, conversation_text=convo,
+                            latest_message="moze rezerviraj taj brod",
+                            customer_id=c.id, guest_mailbox="info@seagull.com")
+    assert r is not None and r.get("owner_asked") is True
+    assert r.get("asset") == b.name
+    db.close()

@@ -29,6 +29,12 @@ PAY_INTENT = [
     "make a reservation", "want to pay", "send me the link", "payment link",
     "please proceed", "proceed", "go ahead", "confirm it", "let's book",
     "change it to", "change to", "switch to", "instead",
+    # Croatian confirmations (guest saying yes to a specific boat we offered)
+    "može rezerv", "moze rezerv", "rezerviraj", "rezervirajte", "može taj",
+    "moze taj", "uzimamo", "uzimam", "hoćemo", "hocemo", "hoću taj", "hocu taj",
+    "može može", "moze moze", "u redu", "potvrđujem", "potvrdujem", "idemo s tim",
+    "može, javi", "moze javi", "zanima nas ovaj", "zanima nas taj", "želimo taj",
+    "zelimo taj", "bukiraj", "bukirajte", "može to", "moze to",
     "anzahlung", "buchen", "bezahlen", "reservieren",
 ]
 
@@ -132,18 +138,24 @@ def try_auto_deposit(db: Session, conversation_text: str, latest_message: str,
     def _match(text):
         t = (text or "").lower()
         best = None
+        import re as _re
         for a in candidates:
-            if a.name.lower() in t:
-                if best is None or len(a.name) > len(best.name):
-                    best = a
-        return best
+            name = a.name.lower()
+            # also match the name without a trailing "(1)"/"(2)" suffix and the
+            # model_group, so "barracuda 545" matches "Barracuda 545 (1)".
+            base = _re.sub(r"\s*\(\d+\)\s*$", "", name).strip()
+            group = (getattr(a, "model_group", "") or "").lower().replace("-", " ")
+            keys = [k for k in (name, base, group) if k]
+            if any(k in t for k in keys):
+                # prefer the most specific (longest) matched key
+                score = max(len(k) for k in keys if k in t)
+                if best is None or score > best[0]:
+                    best = (score, a)
+        return best[1] if best else None
 
     asset = _match(latest_message) or _match(conversation_text)
     if not asset:
         return None  # can't safely pick a boat — let the AI keep talking
-
-    if getattr(asset, "is_external", False):
-        return {"error": "external_asset"}  # external goes through owner flow
 
     start = _parse_date(conversation_text)
     if not start:
@@ -151,13 +163,33 @@ def try_auto_deposit(db: Session, conversation_text: str, latest_message: str,
     full_day = _is_full_day(conversation_text)
     start = start.replace(hour=9, minute=0)
     end = start + timedelta(hours=8 if full_day else 4)
-
     passengers = _parse_passengers(conversation_text) or asset.capacity
 
-    # Verify the boat is actually free for that slot.
-    avail = find_available(db, asset.asset_type, passengers, start, end)
-    if not any(e["asset"].id == asset.id for e in avail):
+    # AVAILABILITY CHAIN: the guest named a model; pick the actual bookable boat by
+    # priority (your boat first, then partners), skipping out-of-service/busy ones.
+    from app.services import chain_service
+    pick = chain_service.pick_for_window(db, asset, start, end)
+    chosen = pick["asset"]
+    if not chosen:
         return {"error": "not_available", "asset": asset.name}
+    asset = chosen  # the real boat we'll book (yours or a partner's)
+
+    # If the chosen boat is a PARTNER boat, run the owner-ask flow instead of an
+    # instant deposit link — we must confirm with the owner first.
+    if getattr(asset, "is_external", False):
+        from app.ai import tools
+        from app.services import pricing
+        pkg_id, pkg = _pick_package(asset, full_day)
+        price = pkg.get("price", 0) if pkg else 0
+        res = tools.request_external_availability(
+            db, customer_id=customer_id, start=start.isoformat(),
+            end=end.isoformat(), passengers=passengers, price=price,
+            asset_id=asset.id, guest_mailbox=guest_mailbox)
+        log.info("chain_external_asked", asset=asset.name,
+                 status=res.get("status", res.get("error", "")))
+        return {"external_request": res.get("request_id"), "asset": asset.name,
+                "owner_asked": True, "needs_human": res.get("needs_human", False),
+                "message": res.get("message", "")}
 
     package_id, pkg = _pick_package(asset, full_day)
 
