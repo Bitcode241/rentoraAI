@@ -21,14 +21,39 @@ log = get_logger("inquiry")
 
 # Words that signal the guest is asking about BOATS specifically.
 BOAT_WORDS = ["boat", "brod", "speedboat", "speed boat", "yacht", "plovilo",
-              "barca", "boot", "tour", "excursion", "izlet", "krstaren"]
+              "barca", "boot", "tour", "excursion", "izlet", "krstaren",
+              "barracuda", "atlantic", "gaia", "marine"]
 JETSKI_WORDS = ["jet ski", "jetski", "jet-ski", "skuter", "jet"]
 
 
-def wants_boats(text: str) -> bool:
+def _db_boat_names(db) -> list:
+    """Actual boat names + model groups from the DB, lowercased, so a guest who
+    types a specific boat name (e.g. 'Barracuda 545') is recognised as wanting a boat."""
+    from app.models.asset import Asset
+    import re as _re
+    out = set()
+    for a in db.query(Asset).filter(Asset.asset_type == "boat",
+                                     Asset.active.is_(True)).all():
+        name = (a.name or "").lower()
+        base = _re.sub(r"\s*\(\d+\)\s*$", "", name).strip()
+        for k in (name, base):
+            if k:
+                out.add(k)
+        grp = (getattr(a, "model_group", "") or "").lower().replace("-", " ")
+        if grp:
+            out.add(grp)
+    return list(out)
+
+
+def wants_boats(text: str, db=None) -> bool:
     t = (text or "").lower()
-    # boat words present, and not primarily a jetski request
-    return any(w in t for w in BOAT_WORDS) and not _is_jetski_only(t)
+    if any(w in t for w in BOAT_WORDS) and not _is_jetski_only(t):
+        return True
+    # also match actual boat names from the DB (e.g. "Barracuda 545")
+    if db is not None:
+        if any(name in t for name in _db_boat_names(db)) and not _is_jetski_only(t):
+            return True
+    return False
 
 
 def _is_jetski_only(t: str) -> bool:

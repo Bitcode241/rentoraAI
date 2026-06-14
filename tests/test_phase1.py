@@ -746,3 +746,15 @@ def test_reply_reattaches_to_recent_thread(monkeypatch):
               .order_by(EmailThread.id.desc()).first())
     assert recent.id == th.id
     db.close()
+
+
+def test_wants_boats_recognizes_model_names():
+    """A guest naming a boat directly ('Barracuda 545') is recognised as a boat inquiry."""
+    from app.core.database import SessionLocal
+    from app.services import inquiry_service as iq
+    db = SessionLocal()
+    # generic word works without db
+    assert iq.wants_boats("zanima me brod za 4 osobe") is True
+    # model name needs db lookup
+    assert iq.wants_boats("zanima me barracuda 545 da li je slobodna", db=db) is True
+    db.close()

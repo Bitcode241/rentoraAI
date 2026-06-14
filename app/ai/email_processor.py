@@ -414,7 +414,7 @@ def _process_unread_inner(db: Session, max_results: int = 10) -> list:
         facts = ""
         try:
             from app.services import inquiry_service
-            if inquiry_service.wants_boats(em.get("body", "")):
+            if inquiry_service.wants_boats(em.get("body", ""), db=db):
                 bf = inquiry_service.build_boat_availability(db, em.get("body", ""))
                 facts = inquiry_service.facts_to_prompt(bf)
                 if bf:
