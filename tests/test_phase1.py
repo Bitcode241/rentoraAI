@@ -946,3 +946,18 @@ def test_widget_page_and_booking_with_addon():
     b = db.get(Booking, bid)
     assert b.total_price == pkg["price"] + 25
     db.close()
+
+
+def test_widget_accent_per_type():
+    from app.core.database import SessionLocal
+    from app.services import settings_service as ss
+    db = SessionLocal()
+    # per-type defaults differ
+    assert ss.widget_accent(db, "jetski") == "#0ea5b7"
+    assert ss.widget_accent(db, "boat") == "#1d6fa5"
+    assert ss.widget_accent(db, "transfer") == "#c79a3b"
+    # setting one doesn't change another
+    ss.set(db, "widget_accent_jetski", "#ff0000")
+    assert ss.widget_accent(db, "jetski") == "#ff0000"
+    assert ss.widget_accent(db, "boat") == "#1d6fa5"
+    db.close()

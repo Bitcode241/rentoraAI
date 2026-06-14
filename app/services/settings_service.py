@@ -59,11 +59,20 @@ def default_deposit_percent(db: Session, fallback: float = 30.0) -> float:
 DEFAULT_LEAD_TIMES = {"jetski": 2, "boat": 8, "transfer": 3}
 
 
-def widget_accent(db: Session, fallback: str = "#0ea5b7") -> str:
-    """Accent colour for the public booking widget. Each business sets its own
-    so one widget codebase works for jetski/seagull/ragusa and resale clients."""
-    v = (get(db, "widget_accent", None) or "").strip()
-    return v or fallback
+def widget_accent(db: Session, asset_type: str = "", fallback: str = "") -> str:
+    """Accent colour for the public booking widget, PER asset type, so each of your
+    sites (jetski / seagull boats / ragusa transfers) gets its own palette. Falls
+    back to a sensible per-type default."""
+    defaults = {"jetski": "#0ea5b7", "boat": "#1d6fa5", "transfer": "#c79a3b",
+                "car": "#c79a3b", "van": "#c79a3b"}
+    t = (asset_type or "").lower()
+    key = f"widget_accent_{t}" if t else "widget_accent"
+    v = (get(db, key, None) or "").strip()
+    if v:
+        return v
+    # legacy single global value, then per-type default
+    legacy = (get(db, "widget_accent", None) or "").strip()
+    return legacy or fallback or defaults.get(t, "#0ea5b7")
 
 
 def get(db: Session, key: str, default=None):

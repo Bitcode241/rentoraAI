@@ -25,7 +25,7 @@ def public_config(asset_type: str = "jetski", db: Session = Depends(get_db)):
     """Branding + accent for the widget header."""
     return {
         "business_name": settings_service.brand_for_type(db, asset_type),
-        "accent": settings_service.widget_accent(db),
+        "accent": settings_service.widget_accent(db, asset_type),
         "deposit_percent": settings_service.default_deposit_percent(db),
         "currency": "EUR",
     }

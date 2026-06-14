@@ -41,7 +41,9 @@ def get_business(db: Session = Depends(get_db), _=Depends(get_current_user)):
         "brand_boat": settings_service.brand_for_type(db, "boat"),
         "brand_jetski": settings_service.brand_for_type(db, "jetski"),
         "brand_transfer": settings_service.brand_for_type(db, "transfer"),
-        "widget_accent": settings_service.widget_accent(db),
+        "widget_accent_jetski": settings_service.widget_accent(db, "jetski"),
+        "widget_accent_boat": settings_service.widget_accent(db, "boat"),
+        "widget_accent_transfer": settings_service.widget_accent(db, "transfer"),
     }
 
 
@@ -59,4 +61,8 @@ def update_business(payload: dict, db: Session = Depends(get_db)):
             settings_service.set(db, k, str(payload[k]).strip())
     if "widget_accent" in payload:
         settings_service.set(db, "widget_accent", str(payload["widget_accent"]).strip())
+    for t in ("jetski", "boat", "transfer"):
+        k = f"widget_accent_{t}"
+        if k in payload:
+            settings_service.set(db, k, str(payload[k]).strip())
     return {"ok": True}

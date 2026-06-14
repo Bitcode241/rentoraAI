@@ -1,6 +1,6 @@
 const API = '';
 let TOKEN = '';
-const PAGES = ['Dashboard','Calendar','Assets','Transfers','Add-ons','Bookings','Customers','Email Inbox','Mail Settings',
+const PAGES = ['Dashboard','Calendar','Assets','Transfers','Add-ons','Widget','Bookings','Customers','Email Inbox','Mail Settings',
   'Settings',
   'Revenue Overview','Upcoming Reservations',
   "Today's Reservations",'Recent Conversations'];
@@ -138,6 +138,51 @@ const RENDER = {
       <button class="btn btn-sm btn-ghost" onclick="delAddon(${x.id})">Obriši</button></td></tr>`).join('')
       ||'<tr><td colspan=6 class="empty">Nema add-ona — dodaj prvi</td></tr>'}</tbody></table></div>`;
   },
+  'Widget': async (v)=>{
+    const biz = await api('/api/settings/business');
+    const base = location.origin;
+    const types = [
+      {k:'jetski', label:'Jet ski', def:'#0ea5b7'},
+      {k:'boat', label:'Brodovi', def:'#1d6fa5'},
+      {k:'transfer', label:'Transferi', def:'#c79a3b'},
+    ];
+    v.innerHTML = `<div class="panel" style="max-width:760px">
+      <h3 style="margin-top:0">Booking widget</h3>
+      <p style="color:var(--mut);font-size:13px">Online rezervacije za tvoje stranice. Svaki tip ima svoju stranicu, svoju boju, i svoj kod za ugradnju. Gost plaća depozit, ostatak na licu mjesta.</p>
+      ${types.map(t=>{
+        const url=`${base}/book/${t.k}`;
+        const accent=biz['widget_accent_'+t.k]||t.def;
+        const iframe=`<iframe src="${url}" style="width:100%;height:900px;border:0" title="Rezervacija"></iframe>`;
+        return `<div style="border:1px solid var(--line);border-radius:12px;padding:16px;margin:14px 0">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <div style="width:14px;height:14px;border-radius:4px;background:${accent}"></div>
+            <b style="font-size:15px">${t.label}</b>
+            <a href="${url}" target="_blank" style="margin-left:auto;font-size:13px;color:var(--accent)">Otvori ↗</a>
+          </div>
+          <label style="font-size:12px;color:var(--mut)">Boja (accent)</label>
+          <div style="display:flex;gap:8px;align-items:center;margin:4px 0 12px">
+            <input type="color" id="wa_${t.k}" value="${accent}" style="width:46px;height:36px;padding:2px;cursor:pointer"
+              oninput="document.getElementById('wahex_${t.k}').value=this.value;document.getElementById('wadot_${t.k}').style.background=this.value">
+            <input id="wahex_${t.k}" value="${accent}" style="flex:1;max-width:140px"
+              oninput="document.getElementById('wa_${t.k}').value=this.value;document.getElementById('wadot_${t.k}').style.background=this.value">
+            <span id="wadot_${t.k}" style="width:20px;height:20px;border-radius:4px;background:${accent};display:inline-block"></span>
+          </div>
+          <label style="font-size:12px;color:var(--mut)">Direktni link (stavi kao dugme u izborniku)</label>
+          <div style="display:flex;gap:6px;margin:4px 0 10px">
+            <input readonly value="${url}" id="lnk_${t.k}" style="flex:1;font-size:13px;background:var(--bg)">
+            <button class="btn btn-sm" onclick="copyVal('lnk_${t.k}')">Kopiraj</button>
+          </div>
+          <label style="font-size:12px;color:var(--mut)">Ugradnja (iframe — zalijepi u HTML stranice)</label>
+          <div style="display:flex;gap:6px;margin:4px 0 0">
+            <input readonly value='${iframe.replace(/'/g,"&#39;")}' id="emb_${t.k}" style="flex:1;font-size:12px;background:var(--bg)">
+            <button class="btn btn-sm" onclick="copyVal('emb_${t.k}')">Kopiraj</button>
+          </div>
+        </div>`;
+      }).join('')}
+      <div style="margin-top:8px"><button class="btn" onclick="saveAccents()">Spremi boje</button>
+      <span id="wmsg" style="margin-left:12px;color:var(--good);font-size:13px"></span></div>
+    </div>`;
+  },
   'Mail Settings': async (v)=>{
     const boxes = await api('/api/mailboxes');
     v.innerHTML = `<div class="toolbar"><button class="btn btn-sm" onclick="mailboxModal()">+ Add email account</button>
@@ -166,11 +211,6 @@ const RENDER = {
       <label>Jet ski</label><input id="set_brand_jetski" value="${biz.brand_jetski||''}" placeholder="Jetski Dubrovnik">
       <label>Transferi</label><input id="set_brand_transfer" value="${biz.brand_transfer||''}" placeholder="Ragusa Transfer">
       <label>Zadani depozit (%)</label><input id="set_dep" type="number" min="0" max="100" value="${biz.default_deposit_percent||30}">
-      <label>Boja widgeta (accent)</label>
-      <div style="display:flex;gap:8px;align-items:center">
-        <input id="set_accent" type="color" value="${biz.widget_accent||'#0ea5b7'}" style="width:48px;height:38px;padding:2px;cursor:pointer" oninput="document.getElementById('set_accent_hex').value=this.value">
-        <input id="set_accent_hex" value="${biz.widget_accent||'#0ea5b7'}" placeholder="#0ea5b7" style="flex:1" oninput="document.getElementById('set_accent').value=this.value">
-      </div>
       <div style="margin:12px 0 20px"><button class="btn" onclick="saveBusiness()">Spremi brendove</button>
       <span id="biz_msg" style="margin-left:12px;color:var(--good);font-size:13px"></span></div>
       <h3>Minimalno vrijeme rezervacije unaprijed</h3>
@@ -572,6 +612,24 @@ async function saveAddon(id){
 async function delAddon(id){ if(!confirm('Obrisati ovaj add-on?'))return;
   await api('/api/addons/'+id,{method:'DELETE'}); go('Add-ons'); }
 
+async function saveAccents(){
+  try{
+    await api('/api/settings/business',{method:'PUT',body:JSON.stringify({
+      widget_accent_jetski:val('wa_jetski'),
+      widget_accent_boat:val('wa_boat'),
+      widget_accent_transfer:val('wa_transfer')})});
+    const m=document.getElementById('wmsg'); if(m) m.textContent='Spremljeno ✓';
+  }catch(e){ alert(e.message); }
+}
+function copyVal(id){
+  const el=document.getElementById(id); if(!el)return;
+  el.select(); el.setSelectionRange(0,99999);
+  navigator.clipboard.writeText(el.value).then(()=>{
+    const old=el.style.background; el.style.background='#d6f5e3';
+    setTimeout(()=>el.style.background=old,600);
+  }).catch(()=>document.execCommand('copy'));
+}
+
 
 // ---- Visual calendar (vessels x days) ----
 async function renderCalendar(v, startISO){
@@ -791,7 +849,6 @@ async function saveBusiness(){
       brand_boat:val('set_brand_boat'),
       brand_jetski:val('set_brand_jetski'),
       brand_transfer:val('set_brand_transfer'),
-      widget_accent:document.getElementById('set_accent')?document.getElementById('set_accent').value:val('set_accent_hex'),
       default_deposit_percent:+val('set_dep')||30})});
     const m=document.getElementById('biz_msg'); if(m) m.textContent='Spremljeno ✓';
   }catch(e){ alert(e.message); }
