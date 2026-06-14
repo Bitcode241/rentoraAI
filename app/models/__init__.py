@@ -17,3 +17,5 @@ __all__ = [
     "Customer", "Booking",
     "Conversation", "Message", "EmailThread", "EmailMessage", "AuditLog",
 ]
+from app.models.addon import AddOn
+from app.models.transfer import TransferRadius

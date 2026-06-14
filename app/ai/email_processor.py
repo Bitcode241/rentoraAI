@@ -104,6 +104,43 @@ def _detect_language(text: str, fallback: str = "en") -> str:
     return fallback or "en"
 
 
+def _transfer_checking_reply(language: str) -> str:
+    """Tell the guest we're confirming the transfer price (route not in our table)."""
+    lang = (language or "en").lower()[:2]
+    if lang == "hr":
+        return ("Pozdrav,\n\nHvala na upitu za transfer! Provjeravam točnu cijenu za "
+                "Vašu rutu i javljam se vrlo brzo s potvrdom.\n\nLijep pozdrav!")
+    if lang == "de":
+        return ("Hallo,\n\nvielen Dank für Ihre Transfer-Anfrage! Ich prüfe den "
+                "genauen Preis für Ihre Strecke und melde mich in Kürze.\n\n"
+                "Beste Grüße!")
+    return ("Hello,\n\nThanks for your transfer request! I'm confirming the exact "
+            "price for your route and will get back to you very shortly.\n\n"
+            "Best regards!")
+
+
+def _notify_owner_transfer_price(db, mailbox, customer, tq, use_manager,
+                                 mailbox_manager):
+    """Email the business owner (you) to set a price for a transfer route the
+    system couldn't price automatically."""
+    dist = (f"{tq['distance_km']} km" if tq.get("distance_km") else "nepoznata")
+    body = (f"Gost traži transfer koji sustav ne može automatski izračunati.\n\n"
+            f"Gost: {customer.full_name or customer.email} ({customer.email})\n"
+            f"Lokacija: {tq.get('location', '—')}\n"
+            f"Udaljenost od baze: {dist}\n"
+            f"Broj osoba: {tq.get('passengers', '—')}\n"
+            f"Povratno: {'DA' if tq.get('round_trip') else 'NE'}\n"
+            f"Razlog: {tq.get('reason', '—')}\n\n"
+            f"Odredi cijenu i odgovori gostu, ili dodaj zonu u admin.")
+    try:
+        if use_manager:
+            mailbox_manager.reply_from(mailbox, mailbox,
+                                       "[CIJENA TRANSFERA] Treba tvoja cijena", body)
+        log.info("owner_transfer_price_emailed", location=tq.get("location"))
+    except Exception as e:
+        log.warning("owner_transfer_email_failed", error=str(e))
+
+
 def _checking_reply(language: str) -> str:
     """Professional 'we're checking availability' message. Used when the chosen
     boat is a partner boat and we've asked the owner in the background — the guest
@@ -559,6 +596,41 @@ def _process_unread_inner(db: Session, max_results: int = 10) -> list:
                              options=len(bf.get("options", [])))
         except Exception as e:
             log.warning("facts_failed", error=str(e))
+
+        # TRANSFER: if the guest asked about a transfer, CODE prices it (GPS radius
+        # or named zone). If the route is unknown, email the owner to set a price
+        # and tell the guest we're checking — never invent a transfer price.
+        try:
+            from app.services import transfer_inquiry_service as tinq
+            if tinq.wants_transfer(em.get("body", "")):
+                tq = tinq.quote_for_message(db, em.get("body", ""))
+                if tq.get("status") == "ok":
+                    dline = (f" (~{tq['distance_km']} km)" if tq.get("distance_km")
+                             else "")
+                    dirtxt = ("povratno" if tq.get("direction") == "round_trip"
+                              else "jednosmjerno")
+                    facts += (f"\n[TRANSFER] Ruta: {tq['location']}{dline}. "
+                              f"Cijena ({dirtxt}, {tq['passengers']} os.): "
+                              f"{tq['price']} EUR. Departure Gruž ili Lapad. "
+                              f"Use this transfer price verbatim.")
+                    log.info("transfer_priced", location=tq["location"],
+                             price=tq["price"])
+                elif tq.get("status") == "needs_owner_price":
+                    # ask the owner to set a price, notify the guest we're checking
+                    _notify_owner_transfer_price(db, mailbox, customer, tq,
+                                                 use_manager, mailbox_manager)
+                    reply_txt = _transfer_checking_reply(customer.language)
+                    _send_or_draft(db, conv_id, thread, mailbox, sender_email, em,
+                                   reply_txt, settings, use_manager,
+                                   mailbox_manager, email_service, intent)
+                    log.info("transfer_owner_price_asked",
+                             location=tq.get("location"))
+                    processed.append({"customer_id": customer.id, "intent": intent,
+                                      "mailbox": mailbox, "transfer_owner_asked": True,
+                                      "auto_sent": True})
+                    continue
+        except Exception as e:
+            log.warning("transfer_inquiry_failed", error=str(e))
 
         result = run_agent(db, em.get("body", ""), language=customer.language,
                            customer_id=customer.id, facts=facts)

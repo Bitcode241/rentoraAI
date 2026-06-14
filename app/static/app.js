@@ -1,6 +1,6 @@
 const API = '';
 let TOKEN = '';
-const PAGES = ['Dashboard','Calendar','Assets','Transfers','Bookings','Customers','Email Inbox','Mail Settings',
+const PAGES = ['Dashboard','Calendar','Assets','Transfers','Add-ons','Bookings','Customers','Email Inbox','Mail Settings',
   'Settings',
   'Revenue Overview','Upcoming Reservations',
   "Today's Reservations",'Recent Conversations'];
@@ -124,6 +124,19 @@ const RENDER = {
       <td class="row-actions"><button class="btn btn-sm btn-ghost" onclick="radiusModal(${r.id})">Uredi</button>
       <button class="btn btn-sm btn-ghost" onclick="delRadius(${r.id})">Obriši</button></td></tr>`).join('')
       ||'<tr><td colspan=6 class="empty">Nema GPS zona — dodaj prvu</td></tr>'}</tbody></table></div>`;
+  },
+  'Add-ons': async (v)=>{
+    const a = await api('/api/addons');
+    v.innerHTML = `<div class="toolbar"><button class="btn btn-sm" onclick="addonModal()">+ Novi add-on</button>
+      <span style="color:var(--mut);font-size:12px">Dodaci koje gost može dodati uz rezervaciju (GoPro, gorivo, instruktor...)</span></div>
+      <div class="panel"><table><thead><tr><th>Naziv</th><th>Cijena</th><th>Po osobi</th><th>Za</th><th>Status</th><th></th></tr></thead>
+      <tbody>${a.map(x=>`<tr><td><b>${x.name}</b>${x.description?`<br><span style="color:var(--mut);font-size:12px">${x.description}</span>`:''}</td>
+      <td>${money(x.price)}</td><td>${x.per_person?'da':'ne'}</td>
+      <td>${x.applies_to||'sve'}</td>
+      <td>${x.active?'<span class="badge-live">● active</span>':'<span class="badge-off">○ off</span>'}</td>
+      <td class="row-actions"><button class="btn btn-sm btn-ghost" onclick="addonModal(${x.id})">Uredi</button>
+      <button class="btn btn-sm btn-ghost" onclick="delAddon(${x.id})">Obriši</button></td></tr>`).join('')
+      ||'<tr><td colspan=6 class="empty">Nema add-ona — dodaj prvi</td></tr>'}</tbody></table></div>`;
   },
   'Mail Settings': async (v)=>{
     const boxes = await api('/api/mailboxes');
@@ -517,6 +530,42 @@ async function saveRadius(id){
 }
 async function delRadius(id){ if(!confirm('Obrisati ovu GPS zonu?'))return;
   await api('/api/transfers/radii/'+id,{method:'DELETE'}); go('Transfers'); }
+
+async function addonModal(id){
+  let a = {name:'',description:'',price:0,per_person:false,applies_to:'',active:true};
+  if(id){ const all = await api('/api/addons'); a = all.find(x=>x.id===id)||a; }
+  openModal(`<h3>${id?'Uredi':'Novi'} add-on</h3>
+    <label>Naziv</label><input id="a_name" value="${a.name||''}" placeholder="GoPro snimka">
+    <label>Opis (nije obavezno)</label><input id="a_desc" value="${a.description||''}" placeholder="Snimka cijele vožnje">
+    <label>Cijena (€)</label><input id="a_price" type="number" step="0.01" value="${a.price||0}">
+    <label>Za koji tip</label>
+    <select id="a_applies">
+      <option value="" ${a.applies_to===''?'selected':''}>Sve</option>
+      <option value="jetski" ${a.applies_to==='jetski'?'selected':''}>Jet ski</option>
+      <option value="boat" ${a.applies_to==='boat'?'selected':''}>Brodovi</option>
+      <option value="transfer" ${a.applies_to==='transfer'?'selected':''}>Transferi</option>
+    </select>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer">
+      <input id="a_pp" type="checkbox" ${a.per_person?'checked':''} style="width:auto">
+      <span>Cijena po osobi (množi se s brojem gostiju)</span>
+    </label>
+    <div class="err" id="aerr"></div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+    <button class="btn" onclick="saveAddon(${id||0})">Spremi</button>
+    <button class="btn btn-ghost" onclick="closeModal()">Odustani</button></div>`);
+}
+async function saveAddon(id){
+  const body={name:val('a_name'),description:val('a_desc'),price:+val('a_price')||0,
+    applies_to:val('a_applies'),
+    per_person:document.getElementById('a_pp')?document.getElementById('a_pp').checked:false};
+  try{
+    if(id) await api('/api/addons/'+id,{method:'PATCH',body:JSON.stringify(body)});
+    else await api('/api/addons',{method:'POST',body:JSON.stringify(body)});
+    closeModal(); go('Add-ons');
+  }catch(e){ document.getElementById('aerr').textContent=e.message; }
+}
+async function delAddon(id){ if(!confirm('Obrisati ovaj add-on?'))return;
+  await api('/api/addons/'+id,{method:'DELETE'}); go('Add-ons'); }
 
 
 // ---- Visual calendar (vessels x days) ----

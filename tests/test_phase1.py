@@ -875,3 +875,46 @@ def test_transfer_radius_pricing(monkeypatch):
     r2 = geo_service.price_for_location(db, "???", passengers=2)
     assert r2["status"] == "needs_owner_price"
     db.close()
+
+
+def test_transfer_quote_and_owner_fallback(monkeypatch):
+    """Known route -> price; beyond radius -> needs owner price."""
+    from app.core.database import SessionLocal
+    from app.models.transfer import TransferRadius
+    from app.services import transfer_inquiry_service as ti, geo_service
+    db = SessionLocal()
+    db.add(TransferRadius(label="do 10", base_label="Lapad", base_lat=42.658,
+                          base_lng=18.077, max_km=10, car_price=30, van_price=45,
+                          service="transfer"))
+    db.commit()
+    assert ti.wants_transfer("trebam transfer s aerodroma") is True
+    monkeypatch.setattr(geo_service, "geocode", lambda loc: (42.70, 18.077))
+    r = ti.quote_for_message(db, "transfer od Babin kuk za 2 osobe")
+    assert r["status"] == "ok" and r["price"] == 30.0
+    # far away -> owner price
+    monkeypatch.setattr(geo_service, "geocode", lambda loc: (43.2, 18.077))
+    r2 = ti.quote_for_message(db, "transfer od Negdje za 2 osobe")
+    assert r2["status"] == "needs_owner_price"
+    db.close()
+
+
+def test_addon_crud():
+    from app.core.database import SessionLocal
+    from app.models.addon import AddOn
+    db = SessionLocal()
+    a = AddOn(name="GoPro", price=25, applies_to="jetski", per_person=False)
+    db.add(a); db.commit(); db.refresh(a)
+    assert a.id and a.price == 25 and a.applies_to == "jetski"
+    db.close()
+
+
+def test_public_booking_api():
+    from app.main import app
+    from fastapi.testclient import TestClient
+    c = TestClient(app)
+    cfg = c.get("/api/public/config?asset_type=jetski").json()
+    assert cfg["business_name"] and cfg["accent"].startswith("#")
+    assets = c.get("/api/public/assets?asset_type=jetski").json()
+    assert len(assets) >= 1 and "packages" in assets[0]
+    # public endpoints must NOT require auth (200, not 401)
+    assert c.get("/api/public/addons?asset_type=jetski").status_code == 200

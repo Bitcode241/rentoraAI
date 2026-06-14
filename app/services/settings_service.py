@@ -59,6 +59,13 @@ def default_deposit_percent(db: Session, fallback: float = 30.0) -> float:
 DEFAULT_LEAD_TIMES = {"jetski": 2, "boat": 8, "transfer": 3}
 
 
+def widget_accent(db: Session, fallback: str = "#0ea5b7") -> str:
+    """Accent colour for the public booking widget. Each business sets its own
+    so one widget codebase works for jetski/seagull/ragusa and resale clients."""
+    v = (get(db, "widget_accent", None) or "").strip()
+    return v or fallback
+
+
 def get(db: Session, key: str, default=None):
     row = db.get(AppSetting, key)
     return row.value if row else default
