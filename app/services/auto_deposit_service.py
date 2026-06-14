@@ -185,7 +185,7 @@ def try_inquiry_chain(db: Session, conversation_text: str, latest_message: str,
     res = tools.request_external_availability(
         db, customer_id=customer_id, start=start.isoformat(),
         end=end.isoformat(), passengers=passengers, price=price,
-        asset_id=chosen.id, guest_mailbox=guest_mailbox)
+        asset_id=chosen.id, package_id=pkg_id, guest_mailbox=guest_mailbox)
     log.info("inquiry_chain_external_asked", asset=chosen.name,
              status=res.get("status", res.get("error", "")))
     return {"external_request": res.get("request_id"), "asset": chosen.name,

@@ -230,6 +230,19 @@ def _maybe_handle_owner_reply(db, sender_email, em, mailbox, manager):
     req.status = "confirmed"
     db.commit()
 
+    # Safety net: a partner boat may have no package/deposit set, which would leave
+    # deposit at 0 and block the payment link. Fall back to the global default %.
+    if (not booking.deposit_amount or booking.deposit_amount <= 0):
+        from app.services import settings_service
+        total = booking.total_price or req.quoted_price or 0
+        pct = settings_service.default_deposit_percent(db)
+        if total > 0:
+            booking.total_price = booking.total_price or total
+            booking.deposit_amount = round(total * pct / 100.0, 2)
+            db.commit()
+            log.info("external_deposit_fallback", booking_id=booking.id,
+                     deposit=booking.deposit_amount)
+
     split = external_service.commission_split(req.quoted_price,
                                               asset.commission_percent)
     # Owner said YES → send the guest the DEPOSIT LINK immediately, so you don't

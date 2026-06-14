@@ -821,3 +821,28 @@ def test_match_handles_croatian_cases():
     assert _match_asset("imate li barracudu 545 slobodnu", cands).id == bar.id
     assert _match_asset("zanima me barracude 545", cands).id == bar.id
     db.close()
+
+
+def test_inquiry_chain_passes_package_so_deposit_works():
+    """The owner request carries a package_id so the eventual booking has a deposit."""
+    from app.core.database import SessionLocal
+    from app.services import auto_deposit_service as ad, external_service
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    db = SessionLocal()
+    bs = db.query(Asset).filter(Asset.asset_type == "boat").limit(2).all()
+    a, b = bs[0], bs[1]
+    base = a.name.lower().split(" (")[0]
+    a.model_group = "grp-pkg"; a.booking_priority = 1; a.out_of_service = True
+    b.model_group = "grp-pkg"; b.booking_priority = 2
+    b.is_external = True; b.owner_email = "p@x.com"
+    db.commit()
+    c = Customer(full_name="G", email="pk@x.com")
+    db.add(c); db.commit(); db.refresh(c)
+    msg = f"imate li {base} slobodnu za 21.10.2026 na 8h"
+    ad.try_inquiry_chain(db, conversation_text=msg, latest_message=msg,
+                         customer_id=c.id, guest_mailbox="info@x.com")
+    req = (db.query(external_service.ExternalRequest)
+           .order_by(external_service.ExternalRequest.id.desc()).first())
+    assert req.package_id and req.package_id > 0
+    db.close()

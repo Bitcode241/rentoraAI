@@ -7,6 +7,9 @@ from app.models.customer import Customer
 from app.services import availability, pricing, booking_service, conversation_service
 from app.integrations.gmail import gmail_service
 from app.integrations.whatsapp import whatsapp_service
+from app.core.logging import get_logger
+
+log = get_logger("tools")
 
 
 def _parse(dt: str) -> datetime:
