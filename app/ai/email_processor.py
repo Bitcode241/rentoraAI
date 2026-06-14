@@ -86,6 +86,25 @@ CANCEL_KW = [
 ]
 
 
+def _checking_reply(language: str) -> str:
+    """Professional 'we're checking availability' message. Used when the chosen
+    boat is a partner boat and we've asked the owner in the background — the guest
+    should NOT know a partner is involved."""
+    lang = (language or "en").lower()[:2]
+    if lang == "hr":
+        return ("Pozdrav,\n\nHvala na upitu! Trenutno provjeravam dostupnost za "
+                "traženi termin i javljam Vam se u najkraćem mogućem roku s "
+                "potvrdom i svim detaljima.\n\nLijep pozdrav!")
+    if lang == "de":
+        return ("Hallo,\n\nvielen Dank für Ihre Anfrage! Ich prüfe gerade die "
+                "Verfügbarkeit für den gewünschten Termin und melde mich "
+                "schnellstmöglich mit einer Bestätigung und allen Details.\n\n"
+                "Beste Grüße!")
+    return ("Hello,\n\nThank you for your inquiry! I'm checking availability for "
+            "your requested dates and will get back to you very shortly with "
+            "confirmation and all the details.\n\nBest regards!")
+
+
 def detect_intent(text: str) -> str:
     t = (text or "").lower()
     # Marketing / B2B sales pitches often mention "boat/yacht" but are NOT guest
@@ -415,6 +434,14 @@ def _process_unread_inner(db: Session, max_results: int = 10) -> list:
                           "actions": result.get("actions", [])}
                 log.info("auto_deposit_sent", customer_id=customer.id,
                          booking_id=dep.get("booking_id"))
+            elif dep and dep.get("owner_asked"):
+                # Partner boat: we've asked the owner in the background. Tell the
+                # guest we're checking availability — do NOT mention partners or
+                # that we have to ask anyone. Clean, professional.
+                result = {"reply": _checking_reply(customer.language),
+                          "needs_human": False, "actions": []}
+                log.info("chain_owner_asked_guest_notified",
+                         customer_id=customer.id, asset=dep.get("asset"))
             elif dep and dep.get("error") == "not_available":
                 log.info("auto_deposit_not_available", asset=dep.get("asset"))
         except Exception as e:
