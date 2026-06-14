@@ -94,15 +94,27 @@ def _checking_reply(language: str) -> str:
     if lang == "hr":
         return ("Pozdrav,\n\nHvala na upitu! Trenutno provjeravam dostupnost za "
                 "traženi termin i javljam Vam se u najkraćem mogućem roku s "
-                "potvrdom i svim detaljima.\n\nLijep pozdrav!")
+                "potvrdom i svim detaljima.\n\n"
+                "Kako bismo ubrzali rezervaciju, molim Vas pošaljite:\n"
+                "• Ime i prezime\n"
+                "• Broj telefona (WhatsApp/Viber)\n"
+                "• Trebate li transfer (prijevoz do plovila)? Polazak je iz Gruža "
+                "ili s Lapada.\n\nLijep pozdrav!")
     if lang == "de":
         return ("Hallo,\n\nvielen Dank für Ihre Anfrage! Ich prüfe gerade die "
-                "Verfügbarkeit für den gewünschten Termin und melde mich "
-                "schnellstmöglich mit einer Bestätigung und allen Details.\n\n"
-                "Beste Grüße!")
-    return ("Hello,\n\nThank you for your inquiry! I'm checking availability for "
-            "your requested dates and will get back to you very shortly with "
-            "confirmation and all the details.\n\nBest regards!")
+                "Verfügbarkeit und melde mich schnellstmöglich mit einer "
+                "Bestätigung.\n\nUm die Buchung zu beschleunigen, senden Sie bitte:\n"
+                "• Vor- und Nachname\n"
+                "• Telefonnummer (WhatsApp/Viber)\n"
+                "• Benötigen Sie einen Transfer zum Boot? Abfahrt ab Gruž oder "
+                "Lapad.\n\nBeste Grüße!")
+    return ("Hello,\n\nThank you for your inquiry! I'm checking availability and "
+            "will get back to you very shortly with confirmation.\n\n"
+            "To speed up your booking, please send us:\n"
+            "• Full name\n"
+            "• Phone number (WhatsApp/Viber)\n"
+            "• Do you need a transfer (ride to the boat)? Departure from Gruž or "
+            "Lapad.\n\nBest regards!")
 
 
 def detect_intent(text: str) -> str:
