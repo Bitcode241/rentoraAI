@@ -281,6 +281,36 @@ def process_unread(db: Session, max_results: int = 10) -> list:
         _processing_lock.release()
 
 
+def _send_or_draft(db, conv_id, thread, mailbox, sender_email, em, reply_text,
+                   settings, use_manager, mailbox_manager, email_service, intent):
+    """Send a ready-made reply (e.g. the 'checking availability' message) the same
+    way the main flow does, and mark the email read. Always auto-sends when
+    AI_AUTO_SEND is on, since this text is safe and code-generated."""
+    from app.models.email import EmailMessage
+    subject = f"Re: {em.get('subject', '')}"
+    reply_ref = em.get("message_id", "") or em.get("in_reply_to", "")
+    if settings.ai_auto_send:
+        if use_manager:
+            mailbox_manager.reply_from(mailbox, sender_email, subject,
+                                       reply_text, thread_id=reply_ref)
+        else:
+            email_service.send(sender_email, subject, reply_text, thread_id=reply_ref)
+        conversation_service.add_message_to(db, conv_id, "email", "outbound", reply_text)
+        db.add(EmailMessage(thread_id=thread.id, gmail_message_id="",
+                            sender=mailbox, recipient=sender_email,
+                            subject=subject, body=reply_text, direction="outbound"))
+        thread.intent = intent
+        db.commit()
+    else:
+        conversation_service.add_message_to(
+            db, conv_id, "email", "outbound",
+            "[DRAFT — awaiting human review] " + reply_text)
+    if use_manager:
+        mailbox_manager.mark_read(mailbox, em.get("id", ""))
+    else:
+        email_service.mark_read(em.get("id", ""))
+
+
 def _process_unread_inner(db: Session, max_results: int = 10) -> list:
     from app.integrations.email_imap import MultiMailboxManager
     mailbox_manager = MultiMailboxManager.from_db(db)
@@ -444,6 +474,31 @@ def _process_unread_inner(db: Session, max_results: int = 10) -> list:
         # CODE COMPUTES THE FACTS (availability + prices) so the AI can't invent
         # boats or prices — it only phrases what the code found. Starts with boats.
         facts = ""
+        # FIRST: if the guest named a model + date and the only available boat is a
+        # PARTNER boat (yours out/busy), ask the owner NOW and tell the guest we're
+        # checking — no "available but on request" confusion.
+        try:
+            from app.services import auto_deposit_service as _ad
+            convo_now = "\n".join(
+                m.body for m in conversation_service.history_for(db, conv_id, limit=20)) \
+                if conv_id else em.get("body", "")
+            inq = _ad.try_inquiry_chain(
+                db, conversation_text=convo_now or em.get("body", ""),
+                latest_message=em.get("body", ""),
+                customer_id=customer.id, guest_mailbox=mailbox)
+            if inq and inq.get("owner_asked"):
+                reply_txt = _checking_reply(customer.language)
+                _send_or_draft(db, conv_id, thread, mailbox, sender_email, em,
+                               reply_txt, settings, use_manager, mailbox_manager,
+                               email_service, intent)
+                log.info("inquiry_chain_owner_asked_guest_notified",
+                         customer_id=customer.id, asset=inq.get("asset"))
+                processed.append({"customer_id": customer.id, "intent": intent,
+                                  "mailbox": mailbox, "owner_asked": True,
+                                  "auto_sent": True})
+                continue
+        except Exception as e:
+            log.warning("inquiry_chain_failed", error=str(e))
         try:
             from app.services import inquiry_service
             if inquiry_service.wants_boats(em.get("body", ""), db=db):

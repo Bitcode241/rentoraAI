@@ -778,3 +778,32 @@ def test_duplicate_thread_id_does_not_crash():
         EmailThread.gmail_thread_id == "<dupe@x>").first()
     assert found is not None and found.id == t1.id
     db.close()
+
+
+def test_inquiry_asks_owner_immediately_when_only_partner_free():
+    """First inquiry: if your boat is out and only the partner's is free, ask the
+    owner right away; if yours is free, return None (normal price reply)."""
+    from app.core.database import SessionLocal
+    from app.services import auto_deposit_service as ad
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    db = SessionLocal()
+    bs = db.query(Asset).filter(Asset.asset_type == "boat").limit(2).all()
+    a, b = bs[0], bs[1]
+    base = a.name.lower().split(" (")[0]
+    a.model_group = "grp-inq"; a.booking_priority = 1; a.out_of_service = True
+    b.model_group = "grp-inq"; b.booking_priority = 2
+    b.is_external = True; b.owner_email = "p@x.com"
+    db.commit()
+    c = Customer(full_name="G", email="iq@x.com")
+    db.add(c); db.commit(); db.refresh(c)
+    msg = f"zanima me {base} 15.10.2026 na 8h da li je slobodna"
+    r = ad.try_inquiry_chain(db, conversation_text=msg, latest_message=msg,
+                             customer_id=c.id, guest_mailbox="info@x.com")
+    assert r is not None and r.get("owner_asked") is True and r.get("asset") == b.name
+    # yours back in service -> no owner ask
+    a.out_of_service = False; db.commit()
+    r2 = ad.try_inquiry_chain(db, conversation_text=msg, latest_message=msg,
+                              customer_id=c.id, guest_mailbox="info@x.com")
+    assert r2 is None
+    db.close()

@@ -118,6 +118,66 @@ def _pick_package(asset, full_day: bool):
     return chosen.get("package_id"), chosen
 
 
+def try_inquiry_chain(db: Session, conversation_text: str, latest_message: str,
+                      customer_id: int, guest_mailbox: str = "") -> dict | None:
+    """On the FIRST inquiry (no payment intent needed): if the guest named a
+    specific boat model + date, and the chain resolves to a PARTNER boat (yours is
+    out of service or busy), ask the owner immediately and tell the guest we're
+    checking. If the chain lands on YOUR boat, return None so the normal
+    availability/price reply is sent. Returns a result dict or None.
+    """
+    from app.models.asset import Asset
+    from app.services import chain_service
+    candidates = db.query(Asset).filter(Asset.active.is_(True)).all()
+
+    def _match(text):
+        t = (text or "").lower()
+        best = None
+        import re as _re
+        for a in candidates:
+            name = a.name.lower()
+            base = _re.sub(r"\s*\(\d+\)\s*$", "", name).strip()
+            group = (getattr(a, "model_group", "") or "").lower().replace("-", " ")
+            keys = [k for k in (name, base, group) if k]
+            if any(k in t for k in keys):
+                score = max(len(k) for k in keys if k in t)
+                if best is None or score > best[0]:
+                    best = (score, a)
+        return best[1] if best else None
+
+    asset = _match(latest_message) or _match(conversation_text)
+    if not asset:
+        return None
+    start = _parse_date(conversation_text)
+    if not start:
+        return None
+    full_day = _is_full_day(conversation_text)
+    start = start.replace(hour=9, minute=0)
+    end = start + timedelta(hours=8 if full_day else 4)
+    passengers = _parse_passengers(conversation_text) or asset.capacity
+
+    pick = chain_service.pick_for_window(db, asset, start, end)
+    chosen = pick["asset"]
+    if not chosen:
+        return None  # nothing free in the group → let normal reply handle it
+    # Only act here if the chosen boat is a PARTNER boat. If it's yours, the normal
+    # availability+price+deposit reply is the right (and faster) path.
+    if not getattr(chosen, "is_external", False):
+        return None
+
+    from app.ai import tools
+    pkg_id, pkg = _pick_package(chosen, full_day)
+    price = pkg.get("price", 0) if pkg else 0
+    res = tools.request_external_availability(
+        db, customer_id=customer_id, start=start.isoformat(),
+        end=end.isoformat(), passengers=passengers, price=price,
+        asset_id=chosen.id, guest_mailbox=guest_mailbox)
+    log.info("inquiry_chain_external_asked", asset=chosen.name,
+             status=res.get("status", res.get("error", "")))
+    return {"external_request": res.get("request_id"), "asset": chosen.name,
+            "owner_asked": True, "needs_human": res.get("needs_human", False)}
+
+
 def try_auto_deposit(db: Session, conversation_text: str, latest_message: str,
                      customer_id: int, guest_mailbox: str = "") -> dict | None:
     """If the guest expressed payment intent and we can resolve boat+date+pax from
