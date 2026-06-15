@@ -939,7 +939,7 @@ def test_widget_page_and_booking_with_addon():
     start = (datetime.now() + timedelta(days=5)).strftime("%Y-%m-%dT09:00:00")
     r = c.post("/api/public/book", json={
         "asset_id": jet["id"], "package_id": pkg["id"], "start": start,
-        "passengers": 2, "name": "T", "email": "w@x.com", "phone": "+385",
+        "passengers": 1, "name": "T", "email": "w@x.com", "phone": "+385",
         "addon_ids": [addon.id]}).json()
     # booking is created and the add-on is folded into the total
     bid = r.get("booking_id")
@@ -1052,4 +1052,51 @@ def test_widget_booking_stores_language():
                     "lang": "en"}, request=None, db=db)
     c = db.query(Customer).filter(Customer.email == "lang@x.com").first()
     assert c.language == "en"
+    db.close()
+
+
+def test_widget_name_overrides_stale():
+    """The name a guest types in the widget always wins over a stale stored one."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.api.routes import public_booking as pb
+    db = SessionLocal()
+    for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
+        j.model_group = "yamaha-vx"
+    db.add(Customer(full_name="old.handle", email="ov@x.com", phone="1"))
+    db.commit()
+    anchor = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    pkg = pb.public_assets("jetski", db=db)[0]["packages"][0]
+    pb.public_book({"asset_id": anchor.id, "package_id": pkg["id"],
+                    "start": "2026-07-06T09:00:00", "qty": 1, "passengers": 1,
+                    "name": "Real Name", "email": "ov@x.com", "phone": "+385",
+                    "lang": "hr"}, request=None, db=db)
+    c = db.query(Customer).filter(Customer.email == "ov@x.com").first()
+    assert c.full_name == "Real Name" and c.phone == "+385"
+    db.close()
+
+
+def test_jetski_extra_person_fee():
+    """2nd person on each jet adds the configured surcharge; widget config exposes it."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.booking import Booking
+    from app.api.routes import public_booking as pb
+    db = SessionLocal()
+    for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
+        j.model_group = "yamaha-vx"
+    db.commit()
+    anchor = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    pkg = pb.public_assets("jetski", db=db)[0]["packages"][1]  # 1h 140
+    # 2 jets, 4 people -> +40
+    pb.public_book({"asset_id": anchor.id, "package_id": pkg["id"],
+                    "start": "2026-08-15T09:00:00", "qty": 2, "passengers": 4,
+                    "name": "X", "email": "ef@x.com", "phone": "1"},
+                   request=None, db=db)
+    bs = db.query(Booking).order_by(Booking.id.desc()).limit(2).all()
+    assert sum(b.total_price for b in bs) == pkg["price"] * 2 + 40
+    # config exposes the fee
+    cfg = pb.public_config("jetski", db=db)
+    assert cfg["extra_person_fee"] == 20.0
     db.close()

@@ -27,6 +27,7 @@ def public_config(asset_type: str = "jetski", db: Session = Depends(get_db)):
         "business_name": settings_service.brand_for_type(db, asset_type),
         "accent": settings_service.widget_accent(db, asset_type),
         "deposit_percent": settings_service.default_deposit_percent(db),
+        "extra_person_fee": settings_service.jetski_extra_person_fee(db),
         "currency": "EUR",
     }
 
@@ -155,12 +156,23 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
         (a.price * passengers if a.per_person else a.price) for a in addons)
     addon_names = ", ".join(a.name for a in addons)
 
+    # Jet ski 2nd-person surcharge: a jet holds up to 2 people; each jet's 2nd
+    # person costs extra. With qty jets and `passengers` total people, the number
+    # of "2nd people" = passengers - qty (first person on each jet is free).
+    extra_person_total = 0.0
+    if anchor.asset_type == "jetski" and passengers > qty:
+        fee = settings_service.jetski_extra_person_fee(db)
+        extra_people = passengers - qty
+        extra_person_total = round(fee * extra_people, 2)
+
     cust = db.query(Customer).filter(Customer.email.ilike(email)).first()
     if not cust:
         cust = Customer(full_name=name or email, email=email, phone=phone)
         db.add(cust); db.commit(); db.refresh(cust)
     else:
-        if name and (not cust.full_name or cust.full_name == cust.email):
+        # the guest just typed these in the widget on purpose — trust them over
+        # whatever stale name/phone we may have stored from an earlier email
+        if name:
             cust.full_name = name
         if phone:
             cust.phone = phone
@@ -184,9 +196,14 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
             db, asset_id=unit.id, customer_id=cust.id,
             package_id=upkg["package_id"],
             start=st, end=end, source="widget", passengers=passengers)
-        if i == 0 and addons_total:
-            b.total_price = (b.total_price or 0) + addons_total
-            b.transfer_note = (f"Add-ons: {addon_names} (+{addons_total:.2f} EUR)")
+        if i == 0 and (addons_total or extra_person_total):
+            b.total_price = (b.total_price or 0) + addons_total + extra_person_total
+            notes = []
+            if extra_person_total:
+                notes.append(f"Dodatna osoba (2/jet): +{extra_person_total:.2f} EUR")
+            if addons_total:
+                notes.append(f"Add-ons: {addon_names} (+{addons_total:.2f} EUR)")
+            b.transfer_note = " | ".join(notes)
             db.commit()
         bookings.append(b)
     if not bookings:

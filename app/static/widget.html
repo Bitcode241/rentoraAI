@@ -124,6 +124,7 @@
         <div class="qty">
           <button onclick="chPax(-1)">−</button><span id="pax">1</span><button onclick="chPax(1)">+</button>
         </div>
+        <div id="extra-note" style="display:none;font-size:13px;color:var(--accent-dark);font-weight:600;margin-top:6px"></div>
         <label class="fl" id="qty-label">Koliko komada</label>
         <div class="qty">
           <button onclick="chQty(-1)">−</button><span id="qty">1</span><button onclick="chQty(1)">+</button>
@@ -176,7 +177,7 @@ const I18N={
     date:'Datum',time:'Vrijeme',people:'Broj osoba',name:'Ime i prezime',email:'Email',
     phone:'Telefon (WhatsApp/Viber)',total:'Ukupno',next:'Dalje',pay:'Plati depozit',
     upto:'do',persons:'osoba',deposit:'depozit',from:'od',perPerson:'po osobi',
-    qty:'Koliko komada',fleet:'u floti',freeNow:n=>`${n} slobodno za ovaj termin`,
+    extraPerson:'za dodatnu osobu',qty:'Koliko komada',fleet:'u floti',freeNow:n=>`${n} slobodno za ovaj termin`,
     checking:'Provjeravam…',free:'✓ Slobodno za odabrani termin',busy:'✗ Zauzeto — probaj drugi termin',
     noUnits:'Trenutno nema dostupnih jedinica.',noAddons:'Nema dodataka.',min:'min',
     depNow:n=>`Sada platiš depozit ${n} · ostatak na licu mjesta`,loading:'Učitavam…',
@@ -188,7 +189,7 @@ const I18N={
     date:'Date',time:'Time',people:'Guests',name:'Full name',email:'Email',
     phone:'Phone (WhatsApp/Viber)',total:'Total',next:'Next',pay:'Pay deposit',
     upto:'up to',persons:'guests',deposit:'deposit',from:'from',perPerson:'per person',
-    qty:'How many',fleet:'in fleet',freeNow:n=>`${n} free for this time`,
+    extraPerson:'for extra person',qty:'How many',fleet:'in fleet',freeNow:n=>`${n} free for this time`,
     checking:'Checking…',free:'✓ Available for this time',busy:'✗ Taken — try another time',
     noUnits:'No units available right now.',noAddons:'No add-ons.',min:'min',
     depNow:n=>`Pay a ${n} deposit now · balance on site`,loading:'Loading…',
@@ -200,7 +201,7 @@ const I18N={
     date:'Datum',time:'Uhrzeit',people:'Personen',name:'Vollständiger Name',email:'E-Mail',
     phone:'Telefon (WhatsApp/Viber)',total:'Gesamt',next:'Weiter',pay:'Anzahlung zahlen',
     upto:'bis',persons:'Personen',deposit:'Anzahlung',from:'ab',perPerson:'pro Person',
-    qty:'Wie viele',fleet:'in Flotte',freeNow:n=>`${n} frei für diese Zeit`,
+    extraPerson:'für Zusatzperson',qty:'Wie viele',fleet:'in Flotte',freeNow:n=>`${n} frei für diese Zeit`,
     checking:'Prüfe…',free:'✓ Verfügbar für diese Zeit',busy:'✗ Belegt — andere Zeit wählen',
     noUnits:'Derzeit keine Einheiten verfügbar.',noAddons:'Keine Extras.',min:'Min',
     depNow:n=>`Jetzt ${n} Anzahlung · Rest vor Ort`,loading:'Lädt…',
@@ -287,9 +288,14 @@ function renderPackages(){
     </div>`).join('');
 }
 function pickPkg(id){ S.pkg=S.asset.packages.find(p=>p.id===id); renderPackages(); checkAvail(); updateBar(); }
-function chPax(d){ S.pax=Math.max(1,Math.min(S.asset?S.asset.capacity:8,S.pax+d)); $('pax').textContent=S.pax; renderAddons(); updateBar(); }
+function chPax(d){ S.pax=Math.max(1,Math.min(S.asset?S.asset.capacity:8,S.pax+d)); $('pax').textContent=S.pax; renderAddons(); showExtra(); updateBar(); }
 function chQty(d){ const max=S.free||((S.asset&&S.asset.fleet_size)||1);
-  S.qty=Math.max(1,Math.min(max,S.qty+d)); $('qty').textContent=S.qty; updateBar(); }
+  S.qty=Math.max(1,Math.min(max,S.qty+d)); $('qty').textContent=S.qty; showExtra(); updateBar(); }
+function showExtra(){
+  const ex=extraPersonTotal(); const el=$('extra-note');
+  if(el){ if(ex>0){ el.textContent=`+ ${money(ex)} ${T.extraPerson}`; el.style.display='block'; }
+    else el.style.display='none'; }
+}
 
 async function checkAvail(){
   if(!S.asset||!S.pkg||!$('date').value){return;}
@@ -327,8 +333,19 @@ function toggleAddon(id){ S.addons.has(id)?S.addons.delete(id):S.addons.add(id);
 function addonsTotal(){
   let t=0; ADDONS.forEach(a=>{ if(S.addons.has(a.id)) t+=a.per_person?a.price*S.pax:a.price; }); return t;
 }
-function total(){ return (S.pkg?S.pkg.price*S.qty:0)+addonsTotal(); }
-function deposit(){ return S.pkg?S.pkg.deposit*S.qty:0; }
+function extraPersonTotal(){
+  // jet ski only: each jet's 2nd person costs extra (passengers - qty), never below 0
+  if(TYPE!=='jetski') return 0;
+  const fee=CFG.extra_person_fee||0;
+  const extra=Math.max(0, S.pax - S.qty);
+  return fee*extra;
+}
+function total(){ return (S.pkg?S.pkg.price*S.qty:0)+addonsTotal()+extraPersonTotal(); }
+function deposit(){
+  const base=S.pkg?S.pkg.deposit*S.qty:0;
+  // deposit is taken on the package; surcharge is collected on site with the balance
+  return base;
+}
 
 function updateBar(){
   $('bar-amt').textContent = money(total());

@@ -56,6 +56,18 @@ def default_deposit_percent(db: Session, fallback: float = 30.0) -> float:
         return float(v) if v is not None else fallback
     except (TypeError, ValueError):
         return fallback
+
+
+def jetski_extra_person_fee(db: Session, fallback: float = 20.0) -> float:
+    """Surcharge per additional person on a jet ski. A jet holds up to 2 people;
+    the 2nd person on each jet costs this much extra. Configurable in admin."""
+    try:
+        v = get(db, "jetski_extra_person_fee", None)
+        return float(v) if v is not None else fallback
+    except (TypeError, ValueError):
+        return fallback
+
+
 DEFAULT_LEAD_TIMES = {"jetski": 2, "boat": 8, "transfer": 3}
 
 
