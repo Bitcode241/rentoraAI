@@ -1025,3 +1025,31 @@ def test_quantity_aware_booking():
     later = pb.public_availability(anchor.id, start2, pkg["id"], qty=1, db=db)
     assert later["free"] == len(jets)
     db.close()
+
+
+def test_widget_time_is_local():
+    """A 09:00 time the guest typed in the widget is stored so it displays 09:00."""
+    from datetime import datetime
+    from app.core.timeutil import local_to_utc, fmt_local
+    st = datetime.fromisoformat("2026-07-01T09:00:00")
+    assert fmt_local(local_to_utc(st), "%H:%M") == "09:00"
+
+
+def test_widget_booking_stores_language():
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.api.routes import public_booking as pb
+    db = SessionLocal()
+    for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
+        j.model_group = "yamaha-vx"
+    db.commit()
+    anchor = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    pkg = pb.public_assets("jetski", db=db)[0]["packages"][0]
+    pb.public_book({"asset_id": anchor.id, "package_id": pkg["id"],
+                    "start": "2026-07-02T09:00:00", "qty": 1, "passengers": 1,
+                    "name": "T", "email": "lang@x.com", "phone": "+385",
+                    "lang": "en"}, request=None, db=db)
+    c = db.query(Customer).filter(Customer.email == "lang@x.com").first()
+    assert c.language == "en"
+    db.close()

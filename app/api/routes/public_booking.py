@@ -95,9 +95,9 @@ def public_availability(asset_id: int, start: str, package_id: int,
     if not asset:
         return {"available": False, "free": 0, "error": "no_asset"}
     try:
+        from app.core.timeutil import local_to_utc
         st = datetime.fromisoformat(start)
-        if st.tzinfo is None:
-            st = st.replace(tzinfo=timezone.utc)
+        st = local_to_utc(st)  # widget time is local Zagreb wall-clock
     except Exception:
         return {"available": False, "free": 0, "error": "bad_date"}
     pkgs = {p["package_id"]: p for p in pricing.list_packages(asset)}
@@ -122,9 +122,9 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
     if not anchor or anchor.is_external or not anchor.active or anchor.out_of_service:
         return {"error": "asset_unavailable"}
     try:
+        from app.core.timeutil import local_to_utc
         st = datetime.fromisoformat(payload["start"])
-        if st.tzinfo is None:
-            st = st.replace(tzinfo=timezone.utc)
+        st = local_to_utc(st)  # widget time is local Zagreb wall-clock
     except Exception:
         return {"error": "bad_date"}
     pkgs = {p["package_id"]: p for p in pricing.list_packages(anchor)}
@@ -164,6 +164,11 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
             cust.full_name = name
         if phone:
             cust.phone = phone
+        db.commit()
+    # remember the widget's language so the PDF/email go out in the same language
+    wlang = (payload.get("lang") or "").strip().lower()[:2]
+    if wlang in ("hr", "en", "de") and cust.language != wlang:
+        cust.language = wlang
         db.commit()
 
     # create one booking per unit; combine deposits into a single checkout

@@ -363,7 +363,7 @@ async function submit(){
   try{
     const r=await fetch(`${API}/book`,{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({asset_id:S.asset.id,package_id:S.pkg.id,start,qty:S.qty,passengers:S.pax,
-        name,email,phone,addon_ids:[...S.addons]})}).then(x=>x.json());
+        name,email,phone,addon_ids:[...S.addons],lang:LANG})}).then(x=>x.json());
     if(r.checkout_url){
       // Stripe Checkout refuses to load inside an iframe. If we're embedded,
       // redirect the TOP window; otherwise redirect normally.

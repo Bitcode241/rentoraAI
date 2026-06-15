@@ -26,3 +26,16 @@ def fmt_local(dt: datetime, pattern: str = "%d.%m.%Y %H:%M") -> str:
     if dt is None:
         return ""
     return to_local(dt).strftime(pattern)
+
+
+def local_to_utc(dt: datetime) -> datetime:
+    """Interpret a NAIVE datetime as local Europe/Zagreb wall-clock time and return
+    the equivalent UTC datetime for storage. Used for times the guest typed in the
+    widget (they mean local time, e.g. 09:00 in Dubrovnik)."""
+    if dt is None:
+        return dt
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc)
+    if _LOCAL is not None:
+        return dt.replace(tzinfo=_LOCAL).astimezone(timezone.utc)
+    return dt.replace(tzinfo=timezone.utc)
