@@ -124,6 +124,10 @@
         <div class="qty">
           <button onclick="chPax(-1)">−</button><span id="pax">1</span><button onclick="chPax(1)">+</button>
         </div>
+        <label class="fl" id="qty-label">Koliko komada</label>
+        <div class="qty">
+          <button onclick="chQty(-1)">−</button><span id="qty">1</span><button onclick="chQty(1)">+</button>
+        </div>
         <div class="avail" id="avail"></div>
       </div>
       <!-- step 3: add-ons -->
@@ -142,7 +146,7 @@
     </div>
 
     <div id="done" class="hide"></div>
-    <div class="powered">Powered by <b>Rentora</b></div>
+    <div class="powered">Powered by <b>RentoraAI</b></div>
   </div>
 
   <!-- sticky summary bar -->
@@ -160,12 +164,74 @@
 <script>
 const TYPE = location.pathname.split('/').pop() || 'jetski';
 const API = '/api/public';
-let CFG={}, ASSETS=[], ADDONS=[], S={asset:null,pkg:null,pax:1,addons:new Set(),step:1,avail:null};
+// Language: ?lang=en in the URL wins, else the browser language, else Croatian.
+const LANG = (()=>{
+  const q=new URLSearchParams(location.search).get('lang');
+  const l=(q||navigator.language||'hr').slice(0,2).toLowerCase();
+  return ['hr','en','de'].includes(l)?l:'en';
+})();
+const I18N={
+  hr:{title:'Rezerviraj online',sub:'Odaberi, plati depozit, gotovo. Ostatak na licu mjesta.',
+    s1:'1 · Odaberi',s2:'2 · Paket i termin',s3:'3 · Dodaci (nije obavezno)',s4:'4 · Tvoji podaci',
+    date:'Datum',time:'Vrijeme',people:'Broj osoba',name:'Ime i prezime',email:'Email',
+    phone:'Telefon (WhatsApp/Viber)',total:'Ukupno',next:'Dalje',pay:'Plati depozit',
+    upto:'do',persons:'osoba',deposit:'depozit',from:'od',perPerson:'po osobi',
+    qty:'Koliko komada',fleet:'u floti',freeNow:n=>`${n} slobodno za ovaj termin`,
+    checking:'Provjeravam…',free:'✓ Slobodno za odabrani termin',busy:'✗ Zauzeto — probaj drugi termin',
+    noUnits:'Trenutno nema dostupnih jedinica.',noAddons:'Nema dodataka.',min:'min',
+    depNow:n=>`Sada platiš depozit ${n} · ostatak na licu mjesta`,loading:'Učitavam…',
+    errEmail:'Upiši ispravan email.',errName:'Upiši ime i prezime.',preparing:'Pripremam…',
+    taken:'Termin je upravo zauzet. Odaberi drugi.',wrong:'Nešto je pošlo po zlu. Pokušaj ponovno.',
+    netErr:'Greška u mreži. Pokušaj ponovno.',loadErr:'Greška pri učitavanju. Pokušaj ponovno.'},
+  en:{title:'Book online',sub:'Choose, pay the deposit, done. Balance on site.',
+    s1:'1 · Choose',s2:'2 · Package & time',s3:'3 · Add-ons (optional)',s4:'4 · Your details',
+    date:'Date',time:'Time',people:'Guests',name:'Full name',email:'Email',
+    phone:'Phone (WhatsApp/Viber)',total:'Total',next:'Next',pay:'Pay deposit',
+    upto:'up to',persons:'guests',deposit:'deposit',from:'from',perPerson:'per person',
+    qty:'How many',fleet:'in fleet',freeNow:n=>`${n} free for this time`,
+    checking:'Checking…',free:'✓ Available for this time',busy:'✗ Taken — try another time',
+    noUnits:'No units available right now.',noAddons:'No add-ons.',min:'min',
+    depNow:n=>`Pay a ${n} deposit now · balance on site`,loading:'Loading…',
+    errEmail:'Enter a valid email.',errName:'Enter your full name.',preparing:'Preparing…',
+    taken:'That slot was just taken. Pick another.',wrong:'Something went wrong. Try again.',
+    netErr:'Network error. Try again.',loadErr:'Loading error. Try again.'},
+  de:{title:'Online buchen',sub:'Wählen, Anzahlung zahlen, fertig. Rest vor Ort.',
+    s1:'1 · Wählen',s2:'2 · Paket & Zeit',s3:'3 · Extras (optional)',s4:'4 · Ihre Daten',
+    date:'Datum',time:'Uhrzeit',people:'Personen',name:'Vollständiger Name',email:'E-Mail',
+    phone:'Telefon (WhatsApp/Viber)',total:'Gesamt',next:'Weiter',pay:'Anzahlung zahlen',
+    upto:'bis',persons:'Personen',deposit:'Anzahlung',from:'ab',perPerson:'pro Person',
+    qty:'Wie viele',fleet:'in Flotte',freeNow:n=>`${n} frei für diese Zeit`,
+    checking:'Prüfe…',free:'✓ Verfügbar für diese Zeit',busy:'✗ Belegt — andere Zeit wählen',
+    noUnits:'Derzeit keine Einheiten verfügbar.',noAddons:'Keine Extras.',min:'Min',
+    depNow:n=>`Jetzt ${n} Anzahlung · Rest vor Ort`,loading:'Lädt…',
+    errEmail:'Gültige E-Mail eingeben.',errName:'Namen eingeben.',preparing:'Bereite vor…',
+    taken:'Termin gerade vergeben. Anderen wählen.',wrong:'Etwas ging schief. Erneut versuchen.',
+    netErr:'Netzwerkfehler. Erneut versuchen.',loadErr:'Ladefehler. Erneut versuchen.'},
+};
+const T=I18N[LANG];
+let CFG={}, ASSETS=[], ADDONS=[], S={asset:null,pkg:null,pax:1,qty:1,addons:new Set(),step:1,avail:null,free:0};
 
-const money=n=>new Intl.NumberFormat('hr-HR',{style:'currency',currency:CFG.currency||'EUR',maximumFractionDigits:0}).format(n||0);
+const money=n=>new Intl.NumberFormat(LANG+'-'+(LANG==='en'?'GB':LANG.toUpperCase()),{style:'currency',currency:CFG.currency||'EUR',maximumFractionDigits:0}).format(n||0);
 const $=id=>document.getElementById(id);
 
 async function init(){
+  document.documentElement.lang=LANG;
+  // apply static labels
+  $('title').textContent=T.title;
+  document.querySelector('.hero p').textContent=T.sub;
+  $('s-asset').querySelector('h2').textContent=T.s1;
+  $('s-pkg').querySelector('h2').textContent=T.s2;
+  $('s-addons').querySelector('h2').textContent=T.s3;
+  $('s-details').querySelector('h2').textContent=T.s4;
+  document.querySelectorAll('.fl').forEach(el=>{
+    const m={'Datum':T.date,'Vrijeme':T.time,'Broj osoba':T.people,
+      'Ime i prezime':T.name,'Email':T.email,'Telefon (WhatsApp/Viber)':T.phone};
+    if(m[el.textContent]) el.textContent=m[el.textContent];
+  });
+  $('g_name').placeholder=LANG==='en'?'John Smith':LANG==='de'?'Max Mustermann':'Ivan Horvat';
+  $('bar').querySelector('.lbl').textContent=T.total;
+  const ql=$('qty-label'); if(ql) ql.textContent=T.qty;
+  $('loading').querySelector('.muted').textContent=T.loading;
   try{
     [CFG, ASSETS, ADDONS] = await Promise.all([
       fetch(`${API}/config?asset_type=${TYPE}`).then(r=>r.json()),
@@ -176,12 +242,11 @@ async function init(){
     $('biz').textContent = CFG.business_name||'';
     $('loading').classList.add('hide'); $('app').classList.remove('hide'); $('bar').classList.remove('hide');
     renderAssets();
-    // default date = tomorrow
     const d=new Date(Date.now()+864e5); $('date').value=d.toISOString().slice(0,10);
     $('date').min=new Date().toISOString().slice(0,10);
     ['date','time'].forEach(id=>$(id).addEventListener('change',checkAvail));
     updateBar();
-  }catch(e){ $('loading').innerHTML='<div class="muted">Greška pri učitavanju. Pokušaj ponovno.</div>'; }
+  }catch(e){ $('loading').innerHTML=`<div class="muted">${T.loadErr}</div>`; }
 }
 function applyTheme(){
   const a=CFG.accent||'#0ea5b7';
@@ -197,12 +262,12 @@ function renderAssets(){
     const from = a.packages.length?Math.min(...a.packages.map(p=>p.price)):0;
     return `<div class="tile ${S.asset&&S.asset.id===a.id?'sel':''}" onclick="pickAsset(${a.id})">
       <div><div class="t-name">${a.name}</div>
-      <div class="t-sub">do ${a.capacity} osoba${a.description&&a.description!==a.name?' · '+a.description:''}</div></div>
+      <div class="t-sub">${T.upto} ${a.capacity} ${T.persons}${a.description&&a.description!==a.name?' · '+a.description:''}</div></div>
       <div style="display:flex;align-items:center">
-      <div class="t-price">od ${money(from)}</div>
+      <div class="t-price">${T.from} ${money(from)}</div>
       <div class="tick">${S.asset&&S.asset.id===a.id?'✓':''}</div></div>
     </div>`;
-  }).join('') || '<div class="muted">Trenutno nema dostupnih jedinica.</div>';
+  }).join('') || `<div class="muted">${T.noUnits}</div>`;
 }
 function pickAsset(id){
   S.asset=ASSETS.find(a=>a.id===id); S.pkg=null; S.avail=null;
@@ -215,7 +280,7 @@ function renderPackages(){
   $('packages').innerHTML = S.asset.packages.map(p=>`
     <div class="tile ${S.pkg&&S.pkg.id===p.id?'sel':''}" onclick="pickPkg(${p.id})">
       <div><div class="t-name">${p.name}</div>
-      <div class="t-sub">${p.duration_minutes} min · depozit ${money(p.deposit)}</div></div>
+      <div class="t-sub">${p.duration_minutes} ${T.min} · ${T.deposit} ${money(p.deposit)}</div></div>
       <div style="display:flex;align-items:center">
       <div class="t-price">${money(p.price)}</div>
       <div class="tick">${S.pkg&&S.pkg.id===p.id?'✓':''}</div></div>
@@ -223,28 +288,36 @@ function renderPackages(){
 }
 function pickPkg(id){ S.pkg=S.asset.packages.find(p=>p.id===id); renderPackages(); checkAvail(); updateBar(); }
 function chPax(d){ S.pax=Math.max(1,Math.min(S.asset?S.asset.capacity:8,S.pax+d)); $('pax').textContent=S.pax; renderAddons(); updateBar(); }
+function chQty(d){ const max=S.free||((S.asset&&S.asset.fleet_size)||1);
+  S.qty=Math.max(1,Math.min(max,S.qty+d)); $('qty').textContent=S.qty; updateBar(); }
 
 async function checkAvail(){
   if(!S.asset||!S.pkg||!$('date').value){return;}
   const start=`${$('date').value}T${$('time').value||'09:00'}:00`;
-  $('avail').textContent='Provjeravam…'; $('avail').className='avail muted';
+  $('avail').textContent=T.checking; $('avail').className='avail muted';
   try{
-    const r=await fetch(`${API}/availability?asset_id=${S.asset.id}&package_id=${S.pkg.id}&start=${encodeURIComponent(start)}`).then(x=>x.json());
-    S.avail=r.available;
-    $('avail').textContent = r.available?'✓ Slobodno za odabrani termin':'✗ Zauzeto — probaj drugi termin';
-    $('avail').className = 'avail '+(r.available?'ok':'no');
-  }catch(e){ S.avail=null; $('avail').textContent=''; }
+    const r=await fetch(`${API}/availability?asset_id=${S.asset.id}&package_id=${S.pkg.id}&start=${encodeURIComponent(start)}&qty=${S.qty}`).then(x=>x.json());
+    S.avail=r.available; S.free=r.free||0;
+    // cap requested qty to what's free
+    if(S.qty>S.free && S.free>0){ S.qty=S.free; $('qty').textContent=S.qty; }
+    if(S.free>0){
+      $('avail').textContent = `${r.available?T.free:T.busy} · ${T.freeNow(S.free)}`;
+      $('avail').className = 'avail '+(r.available?'ok':'no');
+    } else {
+      $('avail').textContent = T.busy; $('avail').className='avail no';
+    }
+  }catch(e){ S.avail=null; S.free=0; $('avail').textContent=''; }
   updateBar();
 }
 
 function renderAddons(){
-  if(!ADDONS.length){ $('addons').innerHTML='<div class="muted">Nema dodataka.</div>'; return; }
+  if(!ADDONS.length){ $('addons').innerHTML=`<div class="muted">${T.noAddons}</div>`; return; }
   $('addons').innerHTML = ADDONS.map(a=>{
     const price = a.per_person ? a.price*S.pax : a.price;
     return `<div class="addon ${S.addons.has(a.id)?'sel':''}" onclick="toggleAddon(${a.id})">
       <div class="box">${S.addons.has(a.id)?'✓':''}</div>
       <div class="a-name">${a.name}${a.description?`<div class="a-desc">${a.description}</div>`:''}
-      ${a.per_person?'<div class="a-desc">po osobi</div>':''}</div>
+      ${a.per_person?`<div class="a-desc">${T.perPerson}</div>`:''}</div>
       <div class="a-price">+${money(price)}</div>
     </div>`;
   }).join('');
@@ -254,17 +327,17 @@ function toggleAddon(id){ S.addons.has(id)?S.addons.delete(id):S.addons.add(id);
 function addonsTotal(){
   let t=0; ADDONS.forEach(a=>{ if(S.addons.has(a.id)) t+=a.per_person?a.price*S.pax:a.price; }); return t;
 }
-function total(){ return (S.pkg?S.pkg.price:0)+addonsTotal(); }
-function deposit(){ return S.pkg?S.pkg.deposit:0; }
+function total(){ return (S.pkg?S.pkg.price*S.qty:0)+addonsTotal(); }
+function deposit(){ return S.pkg?S.pkg.deposit*S.qty:0; }
 
 function updateBar(){
   $('bar-amt').textContent = money(total());
-  $('bar-dep').textContent = S.pkg?`Sada platiš depozit ${money(deposit())} · ostatak na licu mjesta`:'';
+  $('bar-dep').textContent = S.pkg?T.depNow(money(deposit())):'';
   const btn=$('bar-btn');
-  if(S.step===1){ btn.textContent='Dalje'; btn.disabled=!S.asset; }
-  else if(S.step===2){ btn.textContent='Dalje'; btn.disabled=!(S.pkg&&S.avail===true); }
-  else if(S.step===3){ btn.textContent='Dalje'; btn.disabled=false; }
-  else if(S.step===4){ btn.textContent='Plati depozit'; btn.disabled=false; }
+  if(S.step===1){ btn.textContent=T.next; btn.disabled=!S.asset; }
+  else if(S.step===2){ btn.textContent=T.next; btn.disabled=!(S.pkg&&S.avail===true); }
+  else if(S.step===3){ btn.textContent=T.next; btn.disabled=false; }
+  else if(S.step===4){ btn.textContent=T.pay; btn.disabled=false; }
 }
 function setStep(n){ S.step=n;
   document.querySelectorAll('.step').forEach((el,i)=>{el.className='step'+(i<n-1?' done':i===n-1?' active':'');});
@@ -283,21 +356,32 @@ function next(){
 async function submit(){
   const name=$('g_name').value.trim(), email=$('g_email').value.trim(), phone=$('g_phone').value.trim();
   $('err').classList.add('hide');
-  if(!email||!email.includes('@')){ showErr('Upiši ispravan email.'); return; }
-  if(!name){ showErr('Upiši ime i prezime.'); return; }
-  const btn=$('bar-btn'); btn.disabled=true; btn.textContent='Pripremam…';
+  if(!email||!email.includes('@')){ showErr(T.errEmail); return; }
+  if(!name){ showErr(T.errName); return; }
+  const btn=$('bar-btn'); btn.disabled=true; btn.textContent=T.preparing;
   const start=`${$('date').value}T${$('time').value||'09:00'}:00`;
   try{
     const r=await fetch(`${API}/book`,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({asset_id:S.asset.id,package_id:S.pkg.id,start,passengers:S.pax,
+      body:JSON.stringify({asset_id:S.asset.id,package_id:S.pkg.id,start,qty:S.qty,passengers:S.pax,
         name,email,phone,addon_ids:[...S.addons]})}).then(x=>x.json());
-    if(r.checkout_url){ window.location.href=r.checkout_url; }
-    else if(r.error==='not_available'){ showErr('Termin je upravo zauzet. Odaberi drugi.'); reset(); }
-    else { showErr('Nešto je pošlo po zlu. Pokušaj ponovno.'); btn.disabled=false; btn.textContent='Plati depozit'; }
-  }catch(e){ showErr('Greška u mreži. Pokušaj ponovno.'); btn.disabled=false; btn.textContent='Plati depozit'; }
+    if(r.checkout_url){
+      // Stripe Checkout refuses to load inside an iframe. If we're embedded,
+      // redirect the TOP window; otherwise redirect normally.
+      try{
+        if(window.top && window.top!==window.self){ window.top.location.href=r.checkout_url; }
+        else { window.location.href=r.checkout_url; }
+      }catch(e){
+        // cross-origin parent: open Stripe in a new tab as a fallback
+        window.open(r.checkout_url,'_blank');
+        btn.disabled=false; btn.textContent=T.pay;
+      }
+    }
+    else if(r.error==='not_available'){ showErr(T.taken); reset(); }
+    else { showErr(T.wrong); btn.disabled=false; btn.textContent=T.pay; }
+  }catch(e){ showErr(T.netErr); btn.disabled=false; btn.textContent=T.pay; }
 }
 function showErr(m){ $('err').textContent=m; $('err').classList.remove('hide'); }
-function reset(){ const b=$('bar-btn'); b.disabled=false; b.textContent='Plati depozit'; }
+function reset(){ const b=$('bar-btn'); b.disabled=false; b.textContent=T.pay; }
 
 init();
 </script>

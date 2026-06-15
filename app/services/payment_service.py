@@ -26,15 +26,21 @@ def _client():
     return stripe
 
 
-def create_deposit_checkout(booking, asset_name: str, guest_email: str = "") -> dict:
+def create_deposit_checkout(booking, asset_name: str, guest_email: str = "",
+                            override_amount: float = None,
+                            group_booking_ids: list = None) -> dict:
     """Create a Stripe Checkout Session for the booking deposit.
+    override_amount: charge this instead of booking.deposit_amount (for multi-unit
+    bookings where several units share one checkout).
+    group_booking_ids: all booking ids this single payment covers, so the webhook
+    can mark them all paid.
     Returns {url, session_id} or {error}."""
     stripe = _client()
     if not stripe:
         return {"error": "stripe_not_configured",
                 "message": "Stripe nije postavljen (nedostaje ključ)."}
 
-    deposit = booking.deposit_amount or 0
+    deposit = override_amount if override_amount is not None else (booking.deposit_amount or 0)
     if deposit <= 0:
         return {"error": "no_deposit", "message": "Iznos depozita je 0."}
 
@@ -55,7 +61,9 @@ def create_deposit_checkout(booking, asset_name: str, guest_email: str = "") -> 
                 "quantity": 1,
             }],
             customer_email=guest_email or None,
-            metadata={"booking_id": str(booking.id)},
+            metadata={"booking_id": str(booking.id),
+                      "group_booking_ids": ",".join(
+                          str(x) for x in (group_booking_ids or [booking.id]))},
             success_url=f"{settings.public_base_url}/pay/success?booking={booking.id}",
             cancel_url=f"{settings.public_base_url}/pay/cancel?booking={booking.id}",
         )

@@ -51,3 +51,46 @@ def delete_package(package_id: int, db: Session = Depends(get_db)):
     db.delete(pkg)
     db.commit()
     return {"deleted": package_id}
+
+
+@router.post("/apply-to-group/{asset_id}", dependencies=[Depends(require_admin)])
+def apply_packages_to_group(asset_id: int, db: Session = Depends(get_db)):
+    """Copy this asset's packages to every other asset in the same model_group.
+    One source of truth for identical units (e.g. 6x Yamaha VX): set prices once,
+    apply to all. Matches packages by name; updates price/duration, adds missing,
+    leaves the source untouched."""
+    src = db.get(Asset, asset_id)
+    if not src:
+        raise HTTPException(404, "asset_not_found")
+    group = (src.model_group or "").strip().lower()
+    if not group:
+        return {"error": "no_group",
+                "message": "Postavi grupu modela na ovaj resurs da bi primijenio na grupu."}
+
+    src_pkgs = db.query(RentalPackage).filter(
+        RentalPackage.asset_id == src.id).all()
+    targets = [a for a in db.query(Asset).filter(
+        Asset.asset_type == src.asset_type).all()
+        if (a.model_group or "").strip().lower() == group and a.id != src.id]
+
+    updated = 0
+    for t in targets:
+        existing = {p.name: p for p in db.query(RentalPackage).filter(
+            RentalPackage.asset_id == t.id).all()}
+        for sp in src_pkgs:
+            ep = existing.get(sp.name)
+            if ep:
+                ep.duration_minutes = sp.duration_minutes
+                ep.price = sp.price
+                ep.guided = sp.guided
+                ep.description = sp.description
+                ep.active = sp.active
+            else:
+                db.add(RentalPackage(
+                    asset_id=t.id, name=sp.name,
+                    duration_minutes=sp.duration_minutes, price=sp.price,
+                    guided=sp.guided, description=sp.description, active=sp.active))
+        updated += 1
+    db.commit()
+    return {"ok": True, "applied_to": updated, "group": group,
+            "packages": len(src_pkgs)}

@@ -201,8 +201,9 @@ def test_payment_config_endpoint(client, auth):
 def test_pay_success_page(client):
     r = client.get("/pay/success")
     assert r.status_code == 200
-    # multilingual now — default English when no booking given
-    assert "thank you" in r.text.lower() or "deposit" in r.text.lower()
+    # bilingual confirmation page; check for stable markers
+    low = r.text.lower()
+    assert "rentoraai" in low and ("confirmed" in low or "potvrđena" in low)
 
 
 def test_checkout_requires_stripe(client, auth):
@@ -960,4 +961,67 @@ def test_widget_accent_per_type():
     ss.set(db, "widget_accent_jetski", "#ff0000")
     assert ss.widget_accent(db, "jetski") == "#ff0000"
     assert ss.widget_accent(db, "boat") == "#1d6fa5"
+    db.close()
+
+
+def test_apply_packages_to_group():
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.package import RentalPackage
+    from app.api.routes.packages import apply_packages_to_group
+    db = SessionLocal()
+    jets = db.query(Asset).filter(Asset.asset_type == "jetski").all()
+    for j in jets:
+        j.model_group = "yamaha-vx"
+    db.commit()
+    src = jets[0]
+    p = db.query(RentalPackage).filter(RentalPackage.asset_id == src.id,
+                                       RentalPackage.name == "1h").first()
+    p.price = 999
+    db.commit()
+    r = apply_packages_to_group(src.id, db=db)
+    assert r["ok"] and r["applied_to"] == len(jets) - 1
+    for j in jets[1:]:
+        pp = db.query(RentalPackage).filter(RentalPackage.asset_id == j.id,
+                                            RentalPackage.name == "1h").first()
+        assert pp.price == 999
+    db.close()
+
+
+def test_widget_english():
+    from app.main import app
+    from fastapi.testclient import TestClient
+    c = TestClient(app)
+    # widget serves; the EN strings come from client-side JS, so just confirm the
+    # page and the per-type endpoints serve and the powered-by is correct.
+    assert c.get("/book/jetski?lang=en").status_code == 200
+    assert "RentoraAI" in c.get("/book/jetski").text
+
+
+def test_quantity_aware_booking():
+    """Guest books N units of a model; N bookings created, N units freed, and
+    a later slot shows the full fleet free again (multiple tours/day)."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.api.routes import public_booking as pb
+    from datetime import datetime, timedelta
+    db = SessionLocal()
+    jets = db.query(Asset).filter(Asset.asset_type == "jetski").all()
+    for j in jets:
+        j.model_group = "yamaha-vx"
+    db.commit()
+    anchor = jets[0]
+    cards = pb.public_assets("jetski", db=db)
+    assert len(cards) == 1 and cards[0]["fleet_size"] == len(jets)
+    pkg = cards[0]["packages"][1]  # 1h
+    start = (datetime.now() + timedelta(days=9)).strftime("%Y-%m-%dT10:00:00")
+    pb.public_book({"asset_id": anchor.id, "package_id": pkg["id"], "start": start,
+                    "qty": 2, "passengers": 1, "name": "G", "email": "q@x.com",
+                    "phone": "+385"}, request=None, db=db)
+    after = pb.public_availability(anchor.id, start, pkg["id"], qty=1, db=db)
+    assert after["free"] == len(jets) - 2
+    # a different time -> whole fleet free again
+    start2 = (datetime.now() + timedelta(days=9)).strftime("%Y-%m-%dT13:00:00")
+    later = pb.public_availability(anchor.id, start2, pkg["id"], qty=1, db=db)
+    assert later["free"] == len(jets)
     db.close()

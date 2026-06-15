@@ -168,10 +168,11 @@ const RENDER = {
             <span id="wadot_${t.k}" style="width:20px;height:20px;border-radius:4px;background:${accent};display:inline-block"></span>
           </div>
           <label style="font-size:12px;color:var(--mut)">Direktni link (stavi kao dugme u izborniku)</label>
-          <div style="display:flex;gap:6px;margin:4px 0 10px">
+          <div style="display:flex;gap:6px;margin:4px 0 4px">
             <input readonly value="${url}" id="lnk_${t.k}" style="flex:1;font-size:13px;background:var(--bg)">
             <button class="btn btn-sm" onclick="copyVal('lnk_${t.k}')">Kopiraj</button>
           </div>
+          <div style="font-size:11px;color:var(--mut);margin-bottom:10px">Jezik: dodaj <code>?lang=en</code> ili <code>?lang=de</code> na link za fiksni jezik (bez toga prati jezik posjetitelja).</div>
           <label style="font-size:12px;color:var(--mut)">Ugradnja (iframe — zalijepi u HTML stranice)</label>
           <div style="display:flex;gap:6px;margin:4px 0 0">
             <input readonly value='${iframe.replace(/'/g,"&#39;")}' id="emb_${t.k}" style="flex:1;font-size:12px;background:var(--bg)">
@@ -341,6 +342,10 @@ async function assetModal(id){
         <div><label>Min</label><input id="np_dur" type="number" style="width:70px" placeholder="240"></div>
         <div><label>€</label><input id="np_price" type="number" style="width:80px" placeholder="350"></div>
         <button class="btn btn-sm" onclick="addPkg(${id})">+ Add</button>
+      </div>
+      <div style="margin-top:10px">
+        <button class="btn btn-sm btn-ghost" onclick="applyToGroup(${id})" title="Kopiraj ove cijene na sve resurse iste grupe modela">↻ Primijeni cijene na cijelu grupu</button>
+        <span id="grp_msg" style="margin-left:8px;font-size:12px;color:var(--good)"></span>
       </div></div>`:'<div style="color:var(--mut);font-size:12px;margin-top:8px">Save first, then add packages.</div>'}
     <div class="err" id="merr"></div>
     <div style="display:flex;gap:8px;margin-top:14px">
@@ -365,6 +370,15 @@ async function addPkg(assetId){
   catch(e){ document.getElementById('merr').textContent=e.message; }
 }
 async function delPkg(pid,assetId){ await api('/api/packages/'+pid,{method:'DELETE'}); loadPkgs(assetId); }
+async function applyToGroup(assetId){
+  const m=document.getElementById('grp_msg');
+  if(!confirm('Kopirati ove cijene na SVE resurse iste grupe modela?'))return;
+  try{
+    const r=await api('/api/packages/apply-to-group/'+assetId,{method:'POST'});
+    if(r.error==='no_group'){ if(m){m.style.color='var(--warn)';m.textContent='Postavi grupu modela prvo.'} return; }
+    if(m){ m.style.color='var(--good)'; m.textContent=`✓ Primijenjeno na ${r.applied_to} resursa`; }
+  }catch(e){ if(m){m.style.color='var(--warn)';m.textContent=e.message;} }
+}
 async function saveAsset(id){
   const p = {name:val('m_name'),asset_type:val('m_type'),capacity:+val('m_cap'),
     deposit_percent:+val('m_deppct'),calendar_id:val('m_cal'),location:val('m_loc'),

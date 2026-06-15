@@ -33,30 +33,31 @@ def public_config(asset_type: str = "jetski", db: Session = Depends(get_db)):
 
 @router.get("/assets")
 def public_assets(asset_type: str = "jetski", db: Session = Depends(get_db)):
-    """Bookable, in-service, NON-partner assets of a type, with their packages.
-    (Partner boats aren't sold directly through the public widget.)"""
+    """One card PER MODEL GROUP (not per physical unit), with how many units exist.
+    Guests pick a model + quantity; the system assigns free units behind the scenes.
+    Partner boats aren't sold directly through the public widget."""
     rows = (db.query(Asset)
             .filter(Asset.asset_type == asset_type, Asset.active.is_(True),
                     Asset.out_of_service.is_(False),
                     Asset.is_external.is_(False))
             .order_by(Asset.booking_priority, Asset.id).all())
-    out = []
-    seen_groups = set()
+    groups = {}
     for a in rows:
-        # collapse interchangeable models to one card
         grp = (a.model_group or "").strip().lower() or f"id-{a.id}"
-        if grp in seen_groups:
-            continue
-        seen_groups.add(grp)
-        out.append({
-            "id": a.id, "name": a.name, "capacity": a.capacity,
-            "description": a.description or "",
-            "packages": [{"id": p["package_id"], "name": p["name"],
-                          "duration_minutes": p["duration_minutes"],
-                          "price": p["price"], "deposit": p["deposit_amount"]}
-                         for p in pricing.list_packages(a)],
-        })
-    return out
+        if grp not in groups:
+            # display name without the "(1)" suffix
+            import re as _re
+            disp = _re.sub(r"\s*\(\d+\)\s*$", "", a.name).strip()
+            groups[grp] = {"group": grp, "id": a.id, "name": disp,
+                           "capacity": a.capacity,
+                           "description": a.description if a.description != a.name else "",
+                           "fleet_size": 0,
+                           "packages": [{"id": p["package_id"], "name": p["name"],
+                                         "duration_minutes": p["duration_minutes"],
+                                         "price": p["price"], "deposit": p["deposit_amount"]}
+                                        for p in pricing.list_packages(a)]}
+        groups[grp]["fleet_size"] += 1
+    return list(groups.values())
 
 
 @router.get("/addons")
@@ -69,53 +70,74 @@ def public_addons(asset_type: str = "jetski", db: Session = Depends(get_db)):
              "price": a.price, "per_person": a.per_person} for a in rows]
 
 
+def _free_units_in_group(db, anchor_asset, start, end):
+    """All free, in-service, non-partner units in the same model group as
+    anchor_asset for [start,end), ordered by booking priority."""
+    import re as _re
+    grp = (anchor_asset.model_group or "").strip().lower() or f"id-{anchor_asset.id}"
+    units = (db.query(Asset)
+             .filter(Asset.asset_type == anchor_asset.asset_type,
+                     Asset.active.is_(True), Asset.out_of_service.is_(False),
+                     Asset.is_external.is_(False))
+             .order_by(Asset.booking_priority, Asset.id).all())
+    same = [u for u in units
+            if ((u.model_group or "").strip().lower() or f"id-{u.id}") == grp]
+    free = [u for u in same if availability.is_asset_available(db, u, start, end)]
+    return free
+
+
 @router.get("/availability")
 def public_availability(asset_id: int, start: str, package_id: int,
-                        db: Session = Depends(get_db)):
-    """Is this asset free at `start` for the package's duration?"""
+                        qty: int = 1, db: Session = Depends(get_db)):
+    """How many units of this model are free at `start` for the package duration?
+    Returns available count and whether the requested qty fits."""
     asset = db.get(Asset, asset_id)
     if not asset:
-        return {"available": False, "error": "no_asset"}
+        return {"available": False, "free": 0, "error": "no_asset"}
     try:
         st = datetime.fromisoformat(start)
         if st.tzinfo is None:
             st = st.replace(tzinfo=timezone.utc)
     except Exception:
-        return {"available": False, "error": "bad_date"}
+        return {"available": False, "free": 0, "error": "bad_date"}
     pkgs = {p["package_id"]: p for p in pricing.list_packages(asset)}
     pkg = pkgs.get(package_id)
     if not pkg:
-        return {"available": False, "error": "no_package"}
+        return {"available": False, "free": 0, "error": "no_package"}
     end = st + timedelta(minutes=pkg["duration_minutes"])
-    ok = availability.is_asset_available(db, asset, st, end)
-    return {"available": bool(ok)}
+    free = _free_units_in_group(db, asset, st, end)
+    return {"available": len(free) >= max(1, qty), "free": len(free)}
 
 
 @router.post("/book")
 def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
-    """Create a booking from the widget and return a Stripe deposit checkout URL.
-    Expects: asset_id, package_id, start (ISO), passengers, name, email, phone,
-    addon_ids[]. Guest pays the deposit online; balance on site.
+    """Quantity-aware booking from the widget. The guest picks a MODEL + quantity;
+    we assign that many free units for the slot, create a booking per unit, and
+    return ONE Stripe checkout for the combined deposit. Balance on site.
+    Expects: asset_id (any unit of the model), package_id, start (ISO), qty,
+    passengers, name, email, phone, addon_ids[].
     """
     from app.services import payment_service
-    asset = db.get(Asset, int(payload.get("asset_id", 0)))
-    if not asset or asset.is_external or not asset.active or asset.out_of_service:
+    anchor = db.get(Asset, int(payload.get("asset_id", 0)))
+    if not anchor or anchor.is_external or not anchor.active or anchor.out_of_service:
         return {"error": "asset_unavailable"}
-
     try:
         st = datetime.fromisoformat(payload["start"])
         if st.tzinfo is None:
             st = st.replace(tzinfo=timezone.utc)
     except Exception:
         return {"error": "bad_date"}
-
-    pkgs = {p["package_id"]: p for p in pricing.list_packages(asset)}
+    pkgs = {p["package_id"]: p for p in pricing.list_packages(anchor)}
     pkg = pkgs.get(int(payload.get("package_id", 0)))
     if not pkg:
         return {"error": "no_package"}
     end = st + timedelta(minutes=pkg["duration_minutes"])
-    if not availability.is_asset_available(db, asset, st, end):
-        return {"error": "not_available"}
+
+    qty = max(1, int(payload.get("qty") or 1))
+    free = _free_units_in_group(db, anchor, st, end)
+    if len(free) < qty:
+        return {"error": "not_available", "free": len(free)}
+    chosen = free[:qty]
 
     name = (payload.get("name") or "").strip()
     email = (payload.get("email") or "").strip()
@@ -124,16 +146,15 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
         return {"error": "email_required"}
     passengers = int(payload.get("passengers") or 1)
 
-    # add-ons total
     addon_ids = payload.get("addon_ids") or []
     addons = (db.query(AddOn).filter(AddOn.id.in_([int(x) for x in addon_ids]),
                                      AddOn.active.is_(True)).all()
               if addon_ids else [])
+    # add-ons apply once per booking group (not per unit)
     addons_total = sum(
         (a.price * passengers if a.per_person else a.price) for a in addons)
     addon_names = ", ".join(a.name for a in addons)
 
-    # find or create the customer
     cust = db.query(Customer).filter(Customer.email.ilike(email)).first()
     if not cust:
         cust = Customer(full_name=name or email, email=email, phone=phone)
@@ -145,25 +166,47 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
             cust.phone = phone
         db.commit()
 
-    booking = booking_service.create_booking(
-        db, asset_id=asset.id, customer_id=cust.id, package_id=pkg["package_id"],
-        start=st, end=end, source="widget", passengers=passengers)
-    # fold add-ons into the booking total (deposit stays on the package amount)
-    if addons_total:
-        booking.total_price = (booking.total_price or 0) + addons_total
-        note = f"Add-ons: {addon_names} (+{addons_total:.2f} EUR)"
-        booking.transfer_note = (booking.transfer_note + " | " + note).strip(" |") \
-            if booking.transfer_note else note
-        db.commit()
+    # create one booking per unit; combine deposits into a single checkout
+    bookings = []
+    for i, unit in enumerate(chosen):
+        # each physical unit has its own package rows — match by name/duration
+        upkgs = pricing.list_packages(unit)
+        upkg = next((p for p in upkgs if p["name"] == pkg["name"]
+                     and p["duration_minutes"] == pkg["duration_minutes"]), None)
+        if not upkg:
+            continue
+        b = booking_service.create_booking(
+            db, asset_id=unit.id, customer_id=cust.id,
+            package_id=upkg["package_id"],
+            start=st, end=end, source="widget", passengers=passengers)
+        if i == 0 and addons_total:
+            b.total_price = (b.total_price or 0) + addons_total
+            b.transfer_note = (f"Add-ons: {addon_names} (+{addons_total:.2f} EUR)")
+            db.commit()
+        bookings.append(b)
+    if not bookings:
+        return {"error": "no_package"}
 
-    pay = payment_service.create_deposit_checkout(booking, asset.name,
-                                                  guest_email=email)
+    total_deposit = sum(b.deposit_amount or 0 for b in bookings)
+    total_price = sum(b.total_price or 0 for b in bookings)
+    lead = bookings[0]
+    # one Stripe session for the whole group's deposit
+    label = f"{qty}× {pkg['name']} — {_re_strip(anchor.name)}" if qty > 1 else anchor.name
+    pay = payment_service.create_deposit_checkout(
+        lead, label, guest_email=email, override_amount=total_deposit,
+        group_booking_ids=[b.id for b in bookings])
     if not pay.get("url"):
-        return {"error": "payment_failed", "booking_id": booking.id}
-    log.info("public_booking_created", booking_id=booking.id, asset=asset.name,
-             addons=addon_names, addons_total=addons_total)
-    return {"ok": True, "booking_id": booking.id, "checkout_url": pay["url"],
-            "deposit": booking.deposit_amount, "total": booking.total_price}
+        return {"error": "payment_failed", "booking_id": lead.id}
+    log.info("public_booking_created", booking_id=lead.id, asset=anchor.name,
+             qty=qty, units=[u.name for u in chosen],
+             addons=addon_names, deposit=total_deposit)
+    return {"ok": True, "booking_id": lead.id, "checkout_url": pay["url"],
+            "deposit": total_deposit, "total": total_price, "qty": qty}
+
+
+def _re_strip(name):
+    import re as _re
+    return _re.sub(r"\s*\(\d+\)\s*$", "", name or "").strip()
 
 
 # Serve the widget page itself. Embed on any site via link or iframe:
@@ -175,3 +218,43 @@ widget_router = _AR(tags=["widget"])
 @widget_router.get("/book/{asset_type}")
 def widget_page(asset_type: str):
     return FileResponse("app/static/widget.html", media_type="text/html")
+
+
+from fastapi.responses import HTMLResponse
+
+
+def _result_page(title, msg, ok=True):
+    color = "#1a8a5a" if ok else "#c0392b"
+    icon = "✓" if ok else "✕"
+    return HTMLResponse(f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title}</title><style>
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+background:#f6f9fb;color:#0f2230;display:grid;place-items:center;min-height:100vh;margin:0}}
+.box{{background:#fff;border-radius:18px;box-shadow:0 8px 30px rgba(16,40,56,.1);
+padding:40px 32px;max-width:420px;text-align:center;margin:16px}}
+.ic{{width:68px;height:68px;border-radius:50%;background:{color};color:#fff;
+display:grid;place-items:center;font-size:34px;margin:0 auto 18px}}
+h1{{font-size:22px;margin:0 0 8px}}p{{color:#6a7e8c;line-height:1.5;margin:0}}
+.pw{{margin-top:24px;font-size:11px;color:#9fb0bb}}</style></head>
+<body><div class="box"><div class="ic">{icon}</div><h1>{title}</h1><p>{msg}</p>
+<div class="pw">Powered by <b>RentoraAI</b></div></div></body></html>""")
+
+
+@widget_router.get("/pay/success")
+def pay_success():
+    return _result_page(
+        "Plaćanje uspješno!",
+        "Hvala! Vaš depozit je primljen i rezervacija je potvrđena. "
+        "Potvrdu ćete dobiti na email. Vidimo se! / Payment received — your "
+        "booking is confirmed. A confirmation is on its way to your email.",
+        ok=True)
+
+
+@widget_router.get("/pay/cancel")
+def pay_cancel():
+    return _result_page(
+        "Plaćanje otkazano",
+        "Plaćanje nije dovršeno. Možete pokušati ponovno kad god želite. / "
+        "Payment was not completed. You can try again any time.",
+        ok=False)
