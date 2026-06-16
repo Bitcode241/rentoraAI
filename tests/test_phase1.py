@@ -1100,3 +1100,47 @@ def test_jetski_extra_person_fee():
     cfg = pb.public_config("jetski", db=db)
     assert cfg["extra_person_fee"] == 20.0
     db.close()
+
+
+def test_extra_person_scales_with_fleet():
+    """5 jets, 10 people -> 5 surcharges; deposit stays package-based."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.booking import Booking
+    from app.api.routes import public_booking as pb
+    db = SessionLocal()
+    for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
+        j.model_group = "yamaha-vx"
+    db.commit()
+    anchor = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    pkg = pb.public_assets("jetski", db=db)[0]["packages"][1]  # 1h
+    pb.public_book({"asset_id": anchor.id, "package_id": pkg["id"],
+                    "start": "2026-09-09T09:00:00", "qty": 5, "passengers": 10,
+                    "name": "G", "email": "fleet@x.com", "phone": "1"},
+                   request=None, db=db)
+    bs = db.query(Booking).order_by(Booking.id.desc()).limit(5).all()
+    assert sum(b.total_price for b in bs) == pkg["price"] * 5 + 100
+    assert sum(b.deposit_amount for b in bs) == pkg["deposit"] * 5  # no surcharge
+    db.close()
+
+
+def test_jetski_hard_cap_two_per_unit():
+    """A jet ski can never carry more than 2 people per unit, even if asked."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.booking import Booking
+    from app.api.routes import public_booking as pb
+    db = SessionLocal()
+    for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
+        j.model_group = "yamaha-vx"
+    db.commit()
+    anchor = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    assert anchor.capacity == 2
+    pkg = pb.public_assets("jetski", db=db)[0]["packages"][1]
+    pb.public_book({"asset_id": anchor.id, "package_id": pkg["id"],
+                    "start": "2026-10-02T09:00:00", "qty": 1, "passengers": 3,
+                    "name": "X", "email": "cap@x.com", "phone": "1"},
+                   request=None, db=db)
+    b = db.query(Booking).order_by(Booking.id.desc()).first()
+    assert b.passengers == 2  # capped from 3
+    db.close()

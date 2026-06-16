@@ -288,9 +288,17 @@ function renderPackages(){
     </div>`).join('');
 }
 function pickPkg(id){ S.pkg=S.asset.packages.find(p=>p.id===id); renderPackages(); checkAvail(); updateBar(); }
-function chPax(d){ S.pax=Math.max(1,Math.min(S.asset?S.asset.capacity:8,S.pax+d)); $('pax').textContent=S.pax; renderAddons(); showExtra(); updateBar(); }
+function maxPax(){
+  // jet skis hold exactly 2 people each — never more. Other types use capacity.
+  const perUnit = (TYPE==='jetski') ? 2 : ((S.asset&&S.asset.capacity)||2);
+  return perUnit*Math.max(1,S.qty);
+}
+function chPax(d){ S.pax=Math.max(1,Math.min(maxPax(),S.pax+d)); $('pax').textContent=S.pax; renderAddons(); showExtra(); updateBar(); }
 function chQty(d){ const max=S.free||((S.asset&&S.asset.fleet_size)||1);
-  S.qty=Math.max(1,Math.min(max,S.qty+d)); $('qty').textContent=S.qty; showExtra(); updateBar(); }
+  S.qty=Math.max(1,Math.min(max,S.qty+d)); $('qty').textContent=S.qty;
+  if(S.pax>maxPax()) S.pax=maxPax();   // re-cap people to the new fleet size
+  $('pax').textContent=S.pax;
+  showExtra(); updateBar(); }
 function showExtra(){
   const ex=extraPersonTotal(); const el=$('extra-note');
   if(el){ if(ex>0){ el.textContent=`+ ${money(ex)} ${T.extraPerson}`; el.style.display='block'; }

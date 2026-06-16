@@ -38,7 +38,7 @@ JETSKI_PACKAGES = [
     ("Safari 120min (guided)", 120, 350.0, True),
 ]
 JETSKI_COUNT = 6
-JETSKI_CAPACITY = 3  # Yamaha VX seats up to 3
+JETSKI_CAPACITY = 2  # Yamaha VX: max 2 people per jet
 
 # name, car_price, van_price (one-way EUR), sort_order
 TRANSFER_ZONES = [

@@ -146,6 +146,9 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
     if not email:
         return {"error": "email_required"}
     passengers = int(payload.get("passengers") or 1)
+    # jet skis hold exactly 2 people each — cap total people at 2 per unit
+    if anchor.asset_type == "jetski":
+        passengers = max(1, min(passengers, 2 * qty))
 
     addon_ids = payload.get("addon_ids") or []
     addons = (db.query(AddOn).filter(AddOn.id.in_([int(x) for x in addon_ids]),
