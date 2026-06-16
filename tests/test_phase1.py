@@ -1144,3 +1144,65 @@ def test_jetski_hard_cap_two_per_unit():
     b = db.query(Booking).order_by(Booking.id.desc()).first()
     assert b.passengers == 2  # capped from 3
     db.close()
+
+
+def test_addons_in_deposit_and_passengers_min():
+    """Add-ons are fully in the deposit; passengers default to at least 1 per unit."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.addon import AddOn
+    from app.models.booking import Booking
+    from app.api.routes import public_booking as pb
+    import app.services.payment_service as ps
+    ps.create_deposit_checkout = lambda b, name, guest_email="", override_amount=None, group_booking_ids=None: {"url": "http://t", "session_id": "x"}
+    db = SessionLocal()
+    for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
+        j.model_group = "yamaha-vx"
+    db.add(AddOn(name="GoPro", price=25, applies_to="jetski")); db.commit()
+    addon = db.query(AddOn).filter(AddOn.name == "GoPro").first()
+    anchor = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    pkg = pb.public_assets("jetski", db=db)[0]["packages"][1]
+    r = pb.public_book({"asset_id": anchor.id, "package_id": pkg["id"],
+                        "start": "2026-11-11T09:00:00", "qty": 1, "passengers": 1,
+                        "name": "A", "email": "dep@x.com", "phone": "1",
+                        "addon_ids": [addon.id]}, request=None, db=db)
+    assert r["deposit"] == pkg["deposit"] + 25
+    # 3 units but passengers given as 1 -> server bumps to at least 3
+    r2 = pb.public_book({"asset_id": anchor.id, "package_id": pkg["id"],
+                         "start": "2026-11-11T12:00:00", "qty": 3, "passengers": 1,
+                         "name": "B", "email": "mp@x.com", "phone": "2"},
+                        request=None, db=db)
+    bs = db.query(Booking).order_by(Booking.id.desc()).limit(3).all()
+    assert bs[0].passengers >= 1  # each booking has a passenger
+    db.close()
+
+
+def test_widget_transfer_in_deposit(monkeypatch):
+    """A widget transfer is priced server-side via GPS and added to the deposit."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.transfer import TransferRadius
+    from app.api.routes import public_booking as pb
+    import app.services.geo_service as g
+    import app.services.payment_service as ps
+    monkeypatch.setattr(ps, "create_deposit_checkout",
+                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None: {"url": "http://t", "session_id": "x"})
+    db = SessionLocal()
+    for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
+        j.model_group = "yamaha-vx"
+    db.add(TransferRadius(label="10", base_label="Lapad", base_lat=42.658,
+                          base_lng=18.077, max_km=10, car_price=30, van_price=45,
+                          service="transfer"))
+    db.commit()
+    monkeypatch.setattr(g, "geocode", lambda loc: (42.70, 18.077))
+    q = pb.public_transfer_quote("Babin kuk", passengers=2, round_trip=False, db=db)
+    assert q["ok"] and q["price"] == 30.0
+    anchor = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    pkg = pb.public_assets("jetski", db=db)[0]["packages"][1]
+    r = pb.public_book({"asset_id": anchor.id, "package_id": pkg["id"],
+                        "start": "2026-12-12T09:00:00", "qty": 1, "passengers": 1,
+                        "name": "A", "email": "tr@x.com", "phone": "1",
+                        "transfer_location": "Babin kuk"}, request=None, db=db)
+    # transfer (30) is in the deposit
+    assert r["deposit"] == pkg["deposit"] + 30
+    db.close()

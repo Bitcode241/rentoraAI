@@ -135,6 +135,18 @@
       <div class="card hide" id="s-addons">
         <h2>3 · Dodaci (nije obavezno)</h2>
         <div id="addons"></div>
+        <div id="transfer-box" style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
+          <div style="font-weight:700;font-size:14px;margin-bottom:4px" id="tr-title">Trebate li transfer?</div>
+          <div style="font-size:12px;color:var(--mut);margin-bottom:10px" id="tr-sub">Upišite odakle vas vozimo i izračunat ćemo cijenu.</div>
+          <div style="display:flex;gap:6px">
+            <input id="tr-loc" placeholder="npr. Hotel Kompas, Lapad" style="flex:1">
+            <button class="btn btn-sm" id="tr-btn" onclick="quoteTransfer()" style="padding:10px 14px">Izračunaj</button>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13px;cursor:pointer">
+            <input id="tr-round" type="checkbox" style="width:auto" onchange="if(S.transfer)quoteTransfer()"> <span id="tr-roundlbl">Povratni prijevoz (tamo i natrag)</span>
+          </label>
+          <div id="tr-result" style="margin-top:10px;font-size:14px"></div>
+        </div>
       </div>
       <!-- step 4: details -->
       <div class="card hide" id="s-details">
@@ -177,7 +189,7 @@ const I18N={
     date:'Datum',time:'Vrijeme',people:'Broj osoba',name:'Ime i prezime',email:'Email',
     phone:'Telefon (WhatsApp/Viber)',total:'Ukupno',next:'Dalje',pay:'Plati depozit',
     upto:'do',persons:'osoba',deposit:'depozit',from:'od',perPerson:'po osobi',
-    extraPerson:'za dodatnu osobu',qty:'Koliko komada',fleet:'u floti',freeNow:n=>`${n} slobodno za ovaj termin`,
+    extraPerson:'za dodatnu osobu',trTitle:'Trebate li transfer?',trSub:'Upišite odakle vas vozimo i izračunat ćemo cijenu.',trCalc:'Izračunaj',trRound:'Povratni prijevoz (tamo i natrag)',trPrice:'Transfer',trRemove:'ukloni',trUnknown:'Za tu lokaciju javit ćemo cijenu emailom.',qty:'Koliko komada',fleet:'u floti',freeNow:n=>`${n} slobodno za ovaj termin`,
     checking:'Provjeravam…',free:'✓ Slobodno za odabrani termin',busy:'✗ Zauzeto — probaj drugi termin',
     noUnits:'Trenutno nema dostupnih jedinica.',noAddons:'Nema dodataka.',min:'min',
     depNow:n=>`Sada platiš depozit ${n} · ostatak na licu mjesta`,loading:'Učitavam…',
@@ -189,7 +201,7 @@ const I18N={
     date:'Date',time:'Time',people:'Guests',name:'Full name',email:'Email',
     phone:'Phone (WhatsApp/Viber)',total:'Total',next:'Next',pay:'Pay deposit',
     upto:'up to',persons:'guests',deposit:'deposit',from:'from',perPerson:'per person',
-    extraPerson:'for extra person',qty:'How many',fleet:'in fleet',freeNow:n=>`${n} free for this time`,
+    extraPerson:'for extra person',trTitle:'Need a transfer?',trSub:'Enter your pickup location and we\'ll price it.',trCalc:'Calculate',trRound:'Round trip (there and back)',trPrice:'Transfer',trRemove:'remove',trUnknown:'We\'ll email you a price for that location.',qty:'How many',fleet:'in fleet',freeNow:n=>`${n} free for this time`,
     checking:'Checking…',free:'✓ Available for this time',busy:'✗ Taken — try another time',
     noUnits:'No units available right now.',noAddons:'No add-ons.',min:'min',
     depNow:n=>`Pay a ${n} deposit now · balance on site`,loading:'Loading…',
@@ -201,7 +213,7 @@ const I18N={
     date:'Datum',time:'Uhrzeit',people:'Personen',name:'Vollständiger Name',email:'E-Mail',
     phone:'Telefon (WhatsApp/Viber)',total:'Gesamt',next:'Weiter',pay:'Anzahlung zahlen',
     upto:'bis',persons:'Personen',deposit:'Anzahlung',from:'ab',perPerson:'pro Person',
-    extraPerson:'für Zusatzperson',qty:'Wie viele',fleet:'in Flotte',freeNow:n=>`${n} frei für diese Zeit`,
+    extraPerson:'für Zusatzperson',trTitle:'Transfer benötigt?',trSub:'Abholort eingeben, wir berechnen den Preis.',trCalc:'Berechnen',trRound:'Hin- und Rückfahrt',trPrice:'Transfer',trRemove:'entfernen',trUnknown:'Für diesen Ort senden wir den Preis per E-Mail.',qty:'Wie viele',fleet:'in Flotte',freeNow:n=>`${n} frei für diese Zeit`,
     checking:'Prüfe…',free:'✓ Verfügbar für diese Zeit',busy:'✗ Belegt — andere Zeit wählen',
     noUnits:'Derzeit keine Einheiten verfügbar.',noAddons:'Keine Extras.',min:'Min',
     depNow:n=>`Jetzt ${n} Anzahlung · Rest vor Ort`,loading:'Lädt…',
@@ -210,7 +222,7 @@ const I18N={
     netErr:'Netzwerkfehler. Erneut versuchen.',loadErr:'Ladefehler. Erneut versuchen.'},
 };
 const T=I18N[LANG];
-let CFG={}, ASSETS=[], ADDONS=[], S={asset:null,pkg:null,pax:1,qty:1,addons:new Set(),step:1,avail:null,free:0};
+let CFG={}, ASSETS=[], ADDONS=[], S={asset:null,pkg:null,pax:1,qty:1,addons:new Set(),step:1,avail:null,free:0,transfer:null};
 
 const money=n=>new Intl.NumberFormat(LANG+'-'+(LANG==='en'?'GB':LANG.toUpperCase()),{style:'currency',currency:CFG.currency||'EUR',maximumFractionDigits:0}).format(n||0);
 const $=id=>document.getElementById(id);
@@ -232,6 +244,10 @@ async function init(){
   $('g_name').placeholder=LANG==='en'?'John Smith':LANG==='de'?'Max Mustermann':'Ivan Horvat';
   $('bar').querySelector('.lbl').textContent=T.total;
   const ql=$('qty-label'); if(ql) ql.textContent=T.qty;
+  if($('tr-title')) $('tr-title').textContent=T.trTitle;
+  if($('tr-sub')) $('tr-sub').textContent=T.trSub;
+  if($('tr-btn')) $('tr-btn').textContent=T.trCalc;
+  if($('tr-roundlbl')) $('tr-roundlbl').textContent=T.trRound;
   $('loading').querySelector('.muted').textContent=T.loading;
   try{
     [CFG, ASSETS, ADDONS] = await Promise.all([
@@ -296,7 +312,9 @@ function maxPax(){
 function chPax(d){ S.pax=Math.max(1,Math.min(maxPax(),S.pax+d)); $('pax').textContent=S.pax; renderAddons(); showExtra(); updateBar(); }
 function chQty(d){ const max=S.free||((S.asset&&S.asset.fleet_size)||1);
   S.qty=Math.max(1,Math.min(max,S.qty+d)); $('qty').textContent=S.qty;
-  if(S.pax>maxPax()) S.pax=maxPax();   // re-cap people to the new fleet size
+  // at least one person per unit (5 jets -> at least 5 people)
+  if(S.pax<S.qty) S.pax=S.qty;
+  if(S.pax>maxPax()) S.pax=maxPax();   // and never above 2 per unit
   $('pax').textContent=S.pax;
   showExtra(); updateBar(); }
 function showExtra(){
@@ -348,12 +366,33 @@ function extraPersonTotal(){
   const extra=Math.max(0, S.pax - S.qty);
   return fee*extra;
 }
-function total(){ return (S.pkg?S.pkg.price*S.qty:0)+addonsTotal()+extraPersonTotal(); }
+function total(){ return (S.pkg?S.pkg.price*S.qty:0)+addonsTotal()+extraPersonTotal()+(S.transfer?S.transfer.price:0); }
 function deposit(){
+  // package deposit (× qty) + FULL add-ons + FULL transfer up front; extra-person on site
   const base=S.pkg?S.pkg.deposit*S.qty:0;
-  // deposit is taken on the package; surcharge is collected on site with the balance
-  return base;
+  return base+addonsTotal()+(S.transfer?S.transfer.price:0);
 }
+async function quoteTransfer(){
+  const loc=$('tr-loc').value.trim();
+  const res=$('tr-result'); const btn=$('tr-btn');
+  if(loc.length<2){ res.innerHTML=''; S.transfer=null; updateBar(); return; }
+  btn.disabled=true; res.innerHTML=`<span class="muted">${T.checking}</span>`;
+  const rt=$('tr-round').checked;
+  try{
+    const r=await fetch(`${API}/transfer-quote?location=${encodeURIComponent(loc)}&passengers=${S.pax}&round_trip=${rt}`).then(x=>x.json());
+    if(r.ok){
+      S.transfer={location:loc,price:r.price,round_trip:rt};
+      const dist=r.distance_km?` · ${r.distance_km} km`:'';
+      res.innerHTML=`<span style="color:var(--good);font-weight:700">✓ ${T.trPrice}: ${money(r.price)}${dist}</span>
+        <button onclick="clearTransfer()" style="margin-left:8px;background:none;border:none;color:var(--mut);cursor:pointer;text-decoration:underline;font-size:12px">${T.trRemove}</button>`;
+    } else {
+      S.transfer=null;
+      res.innerHTML=`<span style="color:var(--mut)">${T.trUnknown}</span>`;
+    }
+  }catch(e){ S.transfer=null; res.innerHTML=`<span class="muted">${T.netErr}</span>`; }
+  btn.disabled=false; updateBar();
+}
+function clearTransfer(){ S.transfer=null; $('tr-loc').value=''; $('tr-result').innerHTML=''; updateBar(); }
 
 function updateBar(){
   $('bar-amt').textContent = money(total());
@@ -388,7 +427,8 @@ async function submit(){
   try{
     const r=await fetch(`${API}/book`,{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({asset_id:S.asset.id,package_id:S.pkg.id,start,qty:S.qty,passengers:S.pax,
-        name,email,phone,addon_ids:[...S.addons],lang:LANG})}).then(x=>x.json());
+        name,email,phone,addon_ids:[...S.addons],lang:LANG,
+        transfer_location:S.transfer?S.transfer.location:'',transfer_round_trip:S.transfer?S.transfer.round_trip:false})}).then(x=>x.json());
     if(r.checkout_url){
       // Stripe Checkout refuses to load inside an iframe. If we're embedded,
       // redirect the TOP window; otherwise redirect normally.

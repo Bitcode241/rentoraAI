@@ -87,6 +87,27 @@ def _free_units_in_group(db, anchor_asset, start, end):
     return free
 
 
+@router.get("/transfer-quote")
+def public_transfer_quote(location: str, passengers: int = 1,
+                          round_trip: bool = False, db: Session = Depends(get_db)):
+    """Price a transfer to/from a guest-typed location via GPS radius pricing.
+    Used by the widget so guests can add a transfer to a jet/boat booking.
+    Returns {ok, price, distance_km, label} or {ok:false, reason}."""
+    from app.services import geo_service
+    loc = (location or "").strip()
+    if len(loc) < 2:
+        return {"ok": False, "reason": "need_location"}
+    res = geo_service.price_for_location(db, loc, max(1, passengers),
+                                         service="transfer", round_trip=round_trip)
+    if res.get("status") == "ok":
+        return {"ok": True, "price": res["price"],
+                "distance_km": res.get("distance_km"),
+                "label": loc, "round_trip": bool(round_trip)}
+    # unknown route -> can't price automatically; guest can still ask by email
+    return {"ok": False, "reason": res.get("reason", "no_price"),
+            "distance_km": res.get("distance_km")}
+
+
 @router.get("/availability")
 def public_availability(asset_id: int, start: str, package_id: int,
                         qty: int = 1, db: Session = Depends(get_db)):
@@ -146,9 +167,10 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
     if not email:
         return {"error": "email_required"}
     passengers = int(payload.get("passengers") or 1)
-    # jet skis hold exactly 2 people each — cap total people at 2 per unit
+    # at least one person per unit; jet skis hold at most 2 per unit
+    passengers = max(passengers, qty)
     if anchor.asset_type == "jetski":
-        passengers = max(1, min(passengers, 2 * qty))
+        passengers = min(passengers, 2 * qty)
 
     addon_ids = payload.get("addon_ids") or []
     addons = (db.query(AddOn).filter(AddOn.id.in_([int(x) for x in addon_ids]),
@@ -158,6 +180,22 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
     addons_total = sum(
         (a.price * passengers if a.per_person else a.price) for a in addons)
     addon_names = ", ".join(a.name for a in addons)
+
+    # Optional transfer: the guest typed a location; price it server-side via GPS
+    # (never trust a price sent from the browser). Transfer is paid up front.
+    transfer_total = 0.0
+    transfer_label = ""
+    t_loc = (payload.get("transfer_location") or "").strip()
+    if t_loc:
+        from app.services import geo_service
+        t_round = bool(payload.get("transfer_round_trip"))
+        tq = geo_service.price_for_location(db, t_loc, passengers,
+                                            service="transfer", round_trip=t_round)
+        if tq.get("status") == "ok":
+            transfer_total = tq["price"]
+            transfer_label = (f"Transfer {t_loc}"
+                              + (" (povratno)" if t_round else "")
+                              + f": +{transfer_total:.2f} EUR")
 
     # Jet ski 2nd-person surcharge: a jet holds up to 2 people; each jet's 2nd
     # person costs extra. With qty jets and `passengers` total people, the number
@@ -199,20 +237,25 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
             db, asset_id=unit.id, customer_id=cust.id,
             package_id=upkg["package_id"],
             start=st, end=end, source="widget", passengers=passengers)
-        if i == 0 and (addons_total or extra_person_total):
-            b.total_price = (b.total_price or 0) + addons_total + extra_person_total
+        if i == 0 and (addons_total or extra_person_total or transfer_total):
+            b.total_price = (b.total_price or 0) + addons_total + extra_person_total + transfer_total
             notes = []
             if extra_person_total:
                 notes.append(f"Dodatna osoba (2/jet): +{extra_person_total:.2f} EUR")
             if addons_total:
                 notes.append(f"Add-ons: {addon_names} (+{addons_total:.2f} EUR)")
+            if transfer_label:
+                notes.append(transfer_label)
             b.transfer_note = " | ".join(notes)
             db.commit()
         bookings.append(b)
     if not bookings:
         return {"error": "no_package"}
 
-    total_deposit = sum(b.deposit_amount or 0 for b in bookings)
+    # Deposit = package deposit (per unit) + FULL add-ons + FULL transfer. Add-ons
+    # and transfer are paid 100% up front (real cost/reserved); extra-person fee on
+    # site. This protects the business if the guest no-shows.
+    total_deposit = sum(b.deposit_amount or 0 for b in bookings) + addons_total + transfer_total
     total_price = sum(b.total_price or 0 for b in bookings)
     lead = bookings[0]
     # one Stripe session for the whole group's deposit
