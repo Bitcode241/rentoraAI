@@ -382,8 +382,7 @@ async function quoteTransfer(){
     const r=await fetch(`${API}/transfer-quote?location=${encodeURIComponent(loc)}&passengers=${S.pax}&round_trip=${rt}`).then(x=>x.json());
     if(r.ok){
       S.transfer={location:loc,price:r.price,round_trip:rt};
-      const dist=r.distance_km?` · ${r.distance_km} km`:'';
-      res.innerHTML=`<span style="color:var(--good);font-weight:700">✓ ${T.trPrice}: ${money(r.price)}${dist}</span>
+      res.innerHTML=`<span style="color:var(--good);font-weight:700">✓ ${T.trPrice}: ${money(r.price)}</span>
         <button onclick="clearTransfer()" style="margin-left:8px;background:none;border:none;color:var(--mut);cursor:pointer;text-decoration:underline;font-size:12px">${T.trRemove}</button>`;
     } else {
       S.transfer=null;

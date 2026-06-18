@@ -22,11 +22,31 @@ def list_assets(asset_type: Optional[str] = None, active: Optional[bool] = None,
 
 @router.post("", response_model=AssetOut, dependencies=[Depends(require_admin)])
 def create_asset(payload: AssetCreate, db: Session = Depends(get_db)):
-    asset = Asset(**payload.model_dump())
+    data = payload.model_dump()
+    _validate_provider(data)
+    asset = Asset(**data)
     db.add(asset)
     db.commit()
     db.refresh(asset)
     return asset
+
+
+def _validate_provider(data: dict):
+    """Block saving a partner tour without the mandatory provider data."""
+    if (data.get("provider_type") or "own").lower() == "partner":
+        missing = []
+        if not (data.get("provider_name") or "").strip():
+            missing.append("naziv izvođača")
+        if not (data.get("provider_oib") or "").strip():
+            missing.append("OIB izvođača")
+        if float(data.get("partner_total_price") or 0) <= 0:
+            missing.append("ukupna cijena")
+        if float(data.get("my_commission") or 0) <= 0:
+            missing.append("provizija")
+        if float(data.get("my_commission") or 0) > float(data.get("partner_total_price") or 0):
+            raise HTTPException(400, "Provizija ne može biti veća od ukupne cijene.")
+        if missing:
+            raise HTTPException(400, "Partner izlet zahtijeva: " + ", ".join(missing))
 
 
 @router.get("/{asset_id}", response_model=AssetOut)
@@ -42,7 +62,17 @@ def update_asset(asset_id: int, payload: AssetUpdate, db: Session = Depends(get_
     asset = db.get(Asset, asset_id)
     if not asset:
         raise HTTPException(404, "Asset not found")
-    for k, v in payload.model_dump(exclude_none=True).items():
+    updates = payload.model_dump(exclude_none=True)
+    # validate the resulting provider state (merge current + updates)
+    merged = {
+        "provider_type": updates.get("provider_type", asset.provider_type),
+        "provider_name": updates.get("provider_name", asset.provider_name),
+        "provider_oib": updates.get("provider_oib", asset.provider_oib),
+        "partner_total_price": updates.get("partner_total_price", asset.partner_total_price),
+        "my_commission": updates.get("my_commission", asset.my_commission),
+    }
+    _validate_provider(merged)
+    for k, v in updates.items():
         setattr(asset, k, v)
     db.commit()
     db.refresh(asset)

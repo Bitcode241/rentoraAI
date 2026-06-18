@@ -73,6 +73,13 @@ class AssetBase(BaseModel):
     owner_phone: str = ""
     commission_percent: float = 0.0
     payment_direction: str = "you"
+    # Booking-widget provider model (own / partner)
+    provider_type: str = "own"
+    provider_name: str = ""
+    provider_oib: str = ""
+    partner_total_price: float = 0.0
+    my_commission: float = 0.0
+    boost_level: int = 0
 
 
 class AssetCreate(AssetBase):
@@ -105,6 +112,12 @@ class AssetUpdate(BaseModel):
     owner_phone: Optional[str] = None
     commission_percent: Optional[float] = None
     payment_direction: Optional[str] = None
+    provider_type: Optional[str] = None
+    provider_name: Optional[str] = None
+    provider_oib: Optional[str] = None
+    partner_total_price: Optional[float] = None
+    my_commission: Optional[float] = None
+    boost_level: Optional[int] = None
 
 
 class AssetOut(AssetBase):

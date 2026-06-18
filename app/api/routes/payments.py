@@ -86,7 +86,65 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 _notify_owner_paid(db, lead, group=bookings)
             except Exception as e:
                 log.warning("owner_notify_failed", booking_id=lead.id, error=str(e))
+            # generate the correct voucher (partner vs own) and email it to the guest
+            try:
+                _send_voucher(db, lead, group=bookings)
+            except Exception as e:
+                log.warning("voucher_send_failed", booking_id=lead.id, error=str(e))
     return {"received": True}
+
+
+def _send_voucher(db, booking, group=None):
+    """Generate and email the right voucher after payment:
+       - partner tour -> partner voucher (intermediary + provider + split payment)
+       - own tour      -> standard confirmation already covers it (skip)
+    Blocks the partner voucher if provider data is missing."""
+    from app.services import provider_service, voucher_service, settings_service
+    from app.integrations.email_imap import MultiMailboxManager
+    asset = db.get(Asset, booking.asset_id)
+    if not asset or not provider_service.is_partner(asset):
+        return  # own tours use the standard confirmation PDF
+    cust = db.get(Customer, booking.customer_id)
+    if not cust or not cust.email:
+        return
+    group = group or [booking]
+    qty = len(group)
+    amt = provider_service.partner_amounts(asset)
+    from app.core.timeutil import fmt_local
+    business = settings_service.brand_for_type(db, asset.asset_type)
+    business_oib = settings_service.get(db, "business_oib", "") or ""
+    try:
+        pdf = voucher_service.build_partner_voucher(
+            business_name=business, business_oib=business_oib,
+            booking_id=booking.id, asset_name=asset.name,
+            when=fmt_local(booking.start_datetime),
+            guests=getattr(booking, "passengers", None) or "—",
+            tour_name=booking.package_name or "",
+            guest_name=(cust.full_name or "") if cust.full_name != cust.email else "",
+            guest_phone=cust.phone or "",
+            provider_name=asset.provider_name, provider_oib=asset.provider_oib,
+            my_commission=round(amt["commission"] * qty, 2),
+            pay_on_site=round(amt["pay_on_site"] * qty, 2),
+            total_price=round(amt["total"] * qty, 2),
+            pickup_location=getattr(booking, "pickup_location", "") or "",
+            currency="EUR")
+    except voucher_service.PartnerVoucherError as e:
+        log.warning("partner_voucher_blocked", booking_id=booking.id, reason=str(e))
+        return
+    # email the voucher to the guest
+    mgr = MultiMailboxManager.from_db(db)
+    if not mgr.enabled:
+        return
+    box = next(iter(mgr.services.keys()), "")
+    subj = f"Vaš voucher za izlet — rezervacija #{booking.id}"
+    body = ("U privitku je Vaš voucher. Molimo predočite ga izvođaču pri dolasku.\n\n"
+            "Your tour voucher is attached. Please present it to the operator on arrival.")
+    try:
+        mgr.reply_from(box, cust.email, subj, body,
+                       attachment=pdf, attachment_name=f"voucher_{booking.id}.pdf")
+        log.info("partner_voucher_sent", booking_id=booking.id, to=cust.email)
+    except Exception as e:
+        log.warning("partner_voucher_email_failed", booking_id=booking.id, error=str(e))
 
 
 def _notify_owner_paid(db, booking, group=None):

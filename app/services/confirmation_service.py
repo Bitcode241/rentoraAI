@@ -189,19 +189,49 @@ def build_pdf(*, lang, business_name, booking_id, asset_name, when, guests,
     if guest_email:
         rows.append((tr["guest_email"], guest_email))
 
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    def _wrap(text, font, size, max_w):
+        """Split text into lines that fit max_w (points)."""
+        words = str(text).split()
+        if not words:
+            return [""]
+        lines, cur = [], words[0]
+        for wd in words[1:]:
+            if stringWidth(cur + " " + wd, font, size) <= max_w:
+                cur += " " + wd
+            else:
+                lines.append(cur); cur = wd
+        lines.append(cur)
+        return lines
+
+    # value column runs from x=82mm to the right padding (~w-24mm)
+    val_max_w = (w - 24 * mm) - (82 * mm)
+    # pre-compute wrapped lines + each row's height
+    wrapped = []
+    for label, value in rows:
+        lines = _wrap(value, font_bold, 12, val_max_w)
+        wrapped.append((label, lines))
+    row_h = 11 * mm
+    line_h = 5.2 * mm
+    total_h = sum(max(row_h, line_h * len(ls) + 5 * mm) for _, ls in wrapped)
+
     card_top = y + 8 * mm
-    card_h = len(rows) * 11 * mm + 6 * mm
+    card_h = total_h + 6 * mm
     c.setFillColor(light)
     c.roundRect(18 * mm, card_top - card_h, w - 36 * mm, card_h, 3 * mm, fill=1, stroke=0)
 
-    for label, value in rows:
+    for label, lines in wrapped:
         c.setFont(font_reg, 10.5)
         c.setFillColor(grey)
         c.drawString(24 * mm, y, label.upper())
         c.setFillColor(ink)
         c.setFont(font_bold, 12)
-        c.drawString(82 * mm, y, str(value))
-        y -= 11 * mm
+        ly = y
+        for ln in lines:
+            c.drawString(82 * mm, ly, ln)
+            ly -= line_h
+        y -= max(row_h, line_h * len(lines) + 5 * mm)
 
     # ---- money box ----
     y -= 10 * mm

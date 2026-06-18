@@ -335,7 +335,28 @@ async function assetModal(id){
         </select>
       </div>
     </div>
-    ${id?`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+    <div style="margin-top:14px;padding:12px;border:1px dashed var(--accent);border-radius:6px;background:rgba(14,165,183,.05)">
+      <label style="font-weight:600;display:block;margin-bottom:6px">Booking widget — tip izleta</label>
+      <select id="m_provtype" onchange="document.getElementById('partnerfields').style.display=this.value==='partner'?'block':'none'">
+        <option value="own" ${(a.provider_type||'own')==='own'?'selected':''}>Moj izlet (own) — gost plaća depozit online, ostatak na brodu</option>
+        <option value="partner" ${a.provider_type==='partner'?'selected':''}>Partnerski izlet — naplaćujem samo proviziju online</option>
+      </select>
+      <div id="partnerfields" style="display:${a.provider_type==='partner'?'block':'none'};margin-top:10px">
+        <p style="color:var(--mut);font-size:12px;margin-bottom:8px">Za partnerski izlet OBAVEZNI su naziv i OIB izvođača — bez njih se ne može spremiti ni izdati voucher.</p>
+        <label>Naziv izvođača (obrt/firma)</label><input id="m_provname" value="${a.provider_name||''}" placeholder="Pomorski obrt Galeb">
+        <label>OIB izvođača</label><input id="m_provoib" value="${a.provider_oib||''}" placeholder="12345678901">
+        <label>Ukupna cijena izleta (€)</label><input id="m_provtotal" type="number" step="0.01" value="${a.partner_total_price||0}" placeholder="500" oninput="updSplit()">
+        <label>Moja provizija — naplaćuje se online (€)</label><input id="m_provcomm" type="number" step="0.01" value="${a.my_commission||0}" placeholder="200" oninput="updSplit()">
+        <div id="m_split" style="font-size:13px;color:var(--accent-dark);font-weight:600;margin-top:6px"></div>
+        <label>Boost razina (rangiranje/Ads — za kasnije)</label>
+        <select id="m_boost">
+          <option value="0" ${(a.boost_level||0)==0?'selected':''}>Bez boosta</option>
+          <option value="1" ${a.boost_level==1?'selected':''}>Boost 1</option>
+          <option value="2" ${a.boost_level==2?'selected':''}>Boost 2</option>
+          <option value="3" ${a.boost_level==3?'selected':''}>Boost 3 (najviše guranje)</option>
+        </select>
+      </div>
+    </div>
       <label style="font-weight:600">Packages</label>
       <div id="m_pkgs" style="font-size:13px;margin:6px 0">loading…</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:end;margin-top:6px">
@@ -353,6 +374,7 @@ async function assetModal(id){
     <button class="btn" onclick="saveAsset(${id||0})">Save</button>
     <button class="btn btn-ghost" onclick="closeModal()">Cancel</button></div>`);
   if(id) loadPkgs(id);
+  if(typeof updSplit==='function') updSplit();
 }
 async function loadPkgs(assetId){
   const pkgs = await api('/api/packages/by-asset/'+assetId);
@@ -380,6 +402,14 @@ async function applyToGroup(assetId){
     if(m){ m.style.color='var(--good)'; m.textContent=`✓ Primijenjeno na ${r.applied_to} resursa`; }
   }catch(e){ if(m){m.style.color='var(--warn)';m.textContent=e.message;} }
 }
+function updSplit(){
+  const t=+val('m_provtotal')||0, c=+val('m_provcomm')||0;
+  const el=document.getElementById('m_split'); if(!el)return;
+  const onsite=(t-c);
+  if(c>t){ el.style.color='var(--warn)'; el.textContent='⚠ Provizija ne može biti veća od ukupne cijene.'; }
+  else if(t>0&&c>0){ el.style.color='var(--accent-dark)'; el.textContent=`Online (provizija): ${c.toFixed(2)} € · Na brodu izvođaču: ${onsite.toFixed(2)} €`; }
+  else el.textContent='';
+}
 async function saveAsset(id){
   const p = {name:val('m_name'),asset_type:val('m_type'),capacity:+val('m_cap'),
     deposit_percent:+val('m_deppct'),calendar_id:val('m_cal'),location:val('m_loc'),
@@ -389,7 +419,13 @@ async function saveAsset(id){
     is_external:document.getElementById('m_ext').checked,
     owner_name:val('m_oname'),owner_email:val('m_oemail'),
     owner_phone:val('m_ophone'),commission_percent:+val('m_comm'),
-    payment_direction:val('m_paydir')};
+    payment_direction:val('m_paydir'),
+    provider_type:val('m_provtype'),
+    provider_name:val('m_provname'),
+    provider_oib:val('m_provoib'),
+    partner_total_price:+val('m_provtotal')||0,
+    my_commission:+val('m_provcomm')||0,
+    boost_level:+val('m_boost')||0};
   try{ await api(id?'/api/assets/'+id:'/api/assets',
     {method:id?'PATCH':'POST',body:JSON.stringify(p)});
     closeModal(); go('Assets'); }

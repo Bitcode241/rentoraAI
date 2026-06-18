@@ -42,6 +42,19 @@ class Asset(Base):
     # Group equivalent boats so the chain knows they're interchangeable
     # (e.g. all "Barracuda 545" share model_group="barracuda-545").
     model_group: Mapped[str] = mapped_column(String(64), default="")
+    # --- Booking-widget provider model (super-admin only) ---
+    # "own"     = your own boat/tour; guest pays you (deposit or full) online.
+    # "partner" = a partner runs the tour; ONLY your commission is charged online,
+    #             the rest is paid directly to the partner on the boat.
+    provider_type: Mapped[str] = mapped_column(String(16), default="own")
+    provider_name: Mapped[str] = mapped_column(String(160), default="")  # obrt naziv
+    provider_oib: Mapped[str] = mapped_column(String(32), default="")    # OIB izvođača
+    partner_total_price: Mapped[float] = mapped_column(Float, default=0.0)  # ukupna cijena
+    my_commission: Mapped[float] = mapped_column(Float, default=0.0)        # online dio
+    # Boost level (future): partners who accept a higher commission get ranked
+    # higher and pushed harder (Google Ads etc). 0 = none. Stored now so the
+    # ranking/billing engine can be built on top without another migration.
+    boost_level: Mapped[int] = mapped_column(Integer, default=0)
     # Temporary operational stop (breakdown, service, partner pulled it). The boat
     # stays in the system but is skipped by availability + the chain moves to the
     # next boat. Different from `active` (which removes it entirely).

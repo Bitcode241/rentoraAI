@@ -1206,3 +1206,154 @@ def test_widget_transfer_in_deposit(monkeypatch):
     # transfer (30) is in the deposit
     assert r["deposit"] == pkg["deposit"] + 30
     db.close()
+
+
+def test_pdf_wraps_long_addon_text():
+    """A long add-on + transfer note must not crash the PDF and produces output."""
+    from app.services import confirmation_service as cs
+    pdf = cs.build_pdf(
+        lang="hr", business_name="Jetski Dubrovnik", booking_id=1,
+        asset_name="2× Yamaha VX", when="16.06.2026 09:00", guests=4, package="1h",
+        deposit_paid=139.0, full_price=320.0, balance=181.0, transfer_included=True,
+        location="Hotel Kompas, Lapad", phone="+385", guest_name="Ivan",
+        guest_email="i@x.com",
+        transfer_note="Add-ons: GoPro snimka (+25.00 EUR) | Transfer (povratni) — Hotel Kompas, Lapad: +60.00 EUR",
+        currency="EUR")
+    assert pdf and len(pdf) > 1000
+
+
+def test_widget_transfer_stores_pickup(monkeypatch):
+    """The transfer pickup location is stored on the booking for the PDF/skipper."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.transfer import TransferRadius
+    from app.models.booking import Booking
+    from app.api.routes import public_booking as pb
+    import app.services.geo_service as g
+    import app.services.payment_service as ps
+    monkeypatch.setattr(ps, "create_deposit_checkout",
+                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None: {"url": "http://t", "session_id": "x"})
+    db = SessionLocal()
+    for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
+        j.model_group = "yamaha-vx"
+    db.add(TransferRadius(label="10", base_label="Lapad", base_lat=42.658,
+                          base_lng=18.077, max_km=10, car_price=30, van_price=45,
+                          service="transfer"))
+    db.commit()
+    monkeypatch.setattr(g, "geocode", lambda loc: (42.70, 18.077))
+    anchor = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    pkg = pb.public_assets("jetski", db=db)[0]["packages"][1]
+    pb.public_book({"asset_id": anchor.id, "package_id": pkg["id"],
+                    "start": "2026-12-20T09:00:00", "qty": 1, "passengers": 1,
+                    "name": "A", "email": "pk@x.com", "phone": "1",
+                    "transfer_location": "Hotel Kompas", "transfer_round_trip": True},
+                   request=None, db=db)
+    b = db.query(Booking).order_by(Booking.id.desc()).first()
+    assert b.pickup_location == "Hotel Kompas"
+    assert "povratni" in (b.transfer_note or "")
+    db.close()
+
+
+def test_provider_charge_and_validation():
+    """Partner charges only the commission; missing OIB or overcharge is blocked."""
+    from app.services import provider_service as pv
+
+    class A:
+        provider_type = "partner"; provider_name = "Obrt"; provider_oib = "123"
+        partner_total_price = 500; my_commission = 200; name = "T"
+    a = A()
+    assert pv.is_partner(a)
+    amt = pv.partner_amounts(a)
+    assert amt == {"total": 500.0, "commission": 200.0, "pay_on_site": 300.0}
+    assert pv.online_charge(a)["charge"] == 200.0
+    # missing OIB -> blocked
+    a.provider_oib = ""
+    try:
+        pv.online_charge(a); assert False
+    except pv.PartnerChargeError:
+        pass
+    # overcharge gate
+    a.provider_oib = "123"
+    try:
+        pv.assert_partner_charge_safe(a, 300); assert False
+    except pv.PartnerChargeError:
+        pass
+    pv.assert_partner_charge_safe(a, 200)  # ok
+
+
+def test_partner_voucher_requires_provider_data():
+    from app.services.voucher_service import build_partner_voucher, PartnerVoucherError
+    pdf = build_partner_voucher(
+        business_name="Seagull", booking_id=1, asset_name="Atlantic 750",
+        when="20.07.2026 10:00", guests=8, provider_name="Obrt Galeb",
+        provider_oib="12345678901", my_commission=200, pay_on_site=300,
+        total_price=500)
+    assert pdf and len(pdf) > 1000
+    try:
+        build_partner_voucher(business_name="X", booking_id=1, asset_name="Y",
+                              when="", guests=1, provider_name="Obrt",
+                              provider_oib="", my_commission=200, pay_on_site=300,
+                              total_price=500)
+        assert False
+    except PartnerVoucherError:
+        pass
+
+
+def test_partner_widget_charges_only_commission(monkeypatch):
+    """A partner tour booked via the widget charges ONLY the commission online."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.api.routes import public_booking as pb
+    import app.services.payment_service as ps
+    captured = {}
+
+    def fake(b, name, guest_email="", override_amount=None, group_booking_ids=None):
+        captured["amount"] = override_amount
+        return {"url": "http://t", "session_id": "x"}
+    monkeypatch.setattr(ps, "create_deposit_checkout", fake)
+    db = SessionLocal()
+    cards0 = pb.public_assets("boat", db=db)
+    bid = cards0[0]["id"]
+    boat = db.get(Asset, bid)
+    boat.provider_type = "partner"; boat.provider_name = "Galeb"
+    boat.provider_oib = "12345678901"; boat.partner_total_price = 500
+    boat.my_commission = 200
+    boat.is_external = False; boat.out_of_service = False; boat.active = True
+    db.commit()
+    cards = pb.public_assets("boat", db=db)
+    card = next((c for c in cards if c["id"] == bid), None)
+    assert card is not None
+    pkgid = card["packages"][0]["id"]
+    r = pb.public_book({"asset_id": bid, "package_id": pkgid,
+                        "start": "2026-12-25T10:00:00", "qty": 1, "passengers": 2,
+                        "name": "G", "email": "pw@x.com", "phone": "1"},
+                       request=None, db=db)
+    assert captured["amount"] == 200.0  # only commission, not 500
+    assert r["provider_type"] == "partner"
+    db.close()
+
+
+def test_partner_booking_blocked_without_oib(monkeypatch):
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.api.routes import public_booking as pb
+    db = SessionLocal()
+    # pick a boat that actually shows in the public list (has packages, not excluded)
+    cards0 = pb.public_assets("boat", db=db)
+    bid = cards0[0]["id"]
+    boat = db.get(Asset, bid)
+    boat.provider_type = "partner"; boat.provider_name = "Galeb"
+    boat.provider_oib = ""  # missing!
+    boat.partner_total_price = 500; boat.my_commission = 200
+    boat.is_external = False; boat.out_of_service = False; boat.active = True
+    db.commit()
+    cards = pb.public_assets("boat", db=db)
+    card = next((c for c in cards if c["id"] == bid), None)
+    assert card is not None
+    pkgid = card["packages"][0]["id"]
+    r = pb.public_book({"asset_id": bid, "package_id": pkgid,
+                        "start": "2026-12-26T10:00:00", "qty": 1, "passengers": 2,
+                        "name": "G", "email": "no@x.com", "phone": "1"},
+                       request=None, db=db)
+    assert r["error"] == "partner_data_missing"
+    db.close()

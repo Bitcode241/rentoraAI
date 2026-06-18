@@ -185,6 +185,8 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
     # (never trust a price sent from the browser). Transfer is paid up front.
     transfer_total = 0.0
     transfer_label = ""
+    transfer_pickup = ""
+    transfer_dir = ""
     t_loc = (payload.get("transfer_location") or "").strip()
     if t_loc:
         from app.services import geo_service
@@ -193,9 +195,11 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
                                             service="transfer", round_trip=t_round)
         if tq.get("status") == "ok":
             transfer_total = tq["price"]
-            transfer_label = (f"Transfer {t_loc}"
-                              + (" (povratno)" if t_round else "")
-                              + f": +{transfer_total:.2f} EUR")
+            transfer_pickup = t_loc
+            transfer_dir = "round" if t_round else "one_way"
+            dir_txt = "povratni" if t_round else "jednosmjerni"
+            transfer_label = (f"Transfer ({dir_txt}) — {t_loc}: "
+                              f"+{transfer_total:.2f} EUR")
 
     # Jet ski 2nd-person surcharge: a jet holds up to 2 people; each jet's 2nd
     # person costs extra. With qty jets and `passengers` total people, the number
@@ -247,6 +251,8 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
             if transfer_label:
                 notes.append(transfer_label)
             b.transfer_note = " | ".join(notes)
+            if transfer_pickup:
+                b.pickup_location = transfer_pickup
             db.commit()
         bookings.append(b)
     if not bookings:
@@ -258,18 +264,45 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
     total_deposit = sum(b.deposit_amount or 0 for b in bookings) + addons_total + transfer_total
     total_price = sum(b.total_price or 0 for b in bookings)
     lead = bookings[0]
-    # one Stripe session for the whole group's deposit
-    label = f"{qty}× {pkg['name']} — {_re_strip(anchor.name)}" if qty > 1 else anchor.name
+
+    # --- PARTNER tour: charge ONLY the commission online; the rest is paid to the
+    # partner on the boat and must never pass through our gateway. ---
+    from app.services import provider_service
+    if provider_service.is_partner(anchor):
+        problems = provider_service.validate_partner_asset(anchor)
+        if problems:
+            log.warning("partner_booking_blocked", asset=anchor.name, problems=problems)
+            return {"error": "partner_data_missing", "problems": problems}
+        amt = provider_service.partner_amounts(anchor)
+        online = round(amt["commission"] * qty, 2)
+        # hard safety gate before charging
+        try:
+            provider_service.assert_partner_charge_safe(anchor, amt["commission"])
+        except provider_service.PartnerChargeError:
+            return {"error": "partner_overcharge_blocked"}
+        # store split on the lead booking for the voucher
+        lead.total_price = round(amt["total"] * qty, 2)
+        lead.transfer_note = ((lead.transfer_note + " | ") if lead.transfer_note else "") + \
+            (f"PARTNER: {anchor.provider_name} (OIB {anchor.provider_oib}) · "
+             f"provizija {online:.2f}€ online · na brodu {amt['pay_on_site']*qty:.2f}€")
+        db.commit()
+        charge_amount = online
+        label = f"Provizija — {_re_strip(anchor.name)}"
+    else:
+        charge_amount = total_deposit
+        label = f"{qty}× {pkg['name']} — {_re_strip(anchor.name)}" if qty > 1 else anchor.name
+
     pay = payment_service.create_deposit_checkout(
-        lead, label, guest_email=email, override_amount=total_deposit,
+        lead, label, guest_email=email, override_amount=charge_amount,
         group_booking_ids=[b.id for b in bookings])
     if not pay.get("url"):
         return {"error": "payment_failed", "booking_id": lead.id}
     log.info("public_booking_created", booking_id=lead.id, asset=anchor.name,
-             qty=qty, units=[u.name for u in chosen],
-             addons=addon_names, deposit=total_deposit)
+             qty=qty, units=[u.name for u in chosen], provider=anchor.provider_type,
+             charged_online=charge_amount, addons=addon_names)
     return {"ok": True, "booking_id": lead.id, "checkout_url": pay["url"],
-            "deposit": total_deposit, "total": total_price, "qty": qty}
+            "deposit": charge_amount, "total": total_price, "qty": qty,
+            "provider_type": anchor.provider_type}
 
 
 def _re_strip(name):
