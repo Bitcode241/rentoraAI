@@ -1408,3 +1408,43 @@ def test_manual_voucher_partner_vs_block():
     except HTTPException as e:
         assert e.status_code == 400
     db.close()
+
+
+def test_dashboard_overview():
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.models.booking import Booking
+    from app.api.routes.dashboard import dashboard_overview
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    own = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    partner = db.query(Asset).filter(Asset.asset_type == "boat").first()
+    partner.provider_type = "partner"; partner.provider_name = "Galeb"
+    partner.provider_oib = "12345678901"; partner.partner_total_price = 500
+    partner.my_commission = 200
+    db.commit()
+    c = Customer(full_name="Ivan", email="dash@x.com", phone="+385")
+    db.add(c); db.commit(); db.refresh(c)
+    now = datetime.now(timezone.utc)
+    db.add(Booking(asset_id=own.id, customer_id=c.id,
+                   start_datetime=now.replace(hour=8), end_datetime=now.replace(hour=9),
+                   total_price=140, amount_paid=42, payment_status="deposit_paid",
+                   passengers=2, package_name="1h", source="widget"))
+    db.add(Booking(asset_id=partner.id, customer_id=c.id,
+                   start_datetime=(now + timedelta(days=1)).replace(hour=10),
+                   end_datetime=(now + timedelta(days=1)).replace(hour=18),
+                   total_price=500, amount_paid=200, payment_status="deposit_paid",
+                   passengers=6, package_name="Full day", source="widget"))
+    db.commit()
+    ov = dashboard_overview(days=7, db=db)
+    assert ov["summary"]["tours"] >= 2
+    assert ov["summary"]["partner_tours"] >= 1
+    assert len(ov["days"]) == 7
+    assert ov["days"][0]["label"] == "Danas"
+    assert ov["days"][1]["label"] == "Sutra"
+    # partner tour shows pay_on_site as to_collect
+    all_tours = [t for d in ov["days"] for t in d["tours"]]
+    partner_tour = next(t for t in all_tours if t["provider_type"] == "partner")
+    assert partner_tour["to_collect"] == 300.0
+    db.close()

@@ -1,5 +1,6 @@
 const API = '';
 let TOKEN = '';
+let DASH = null;
 const PAGES = ['Dashboard','Calendar','Assets','Transfers','Add-ons','Widget','Bookings','Customers','Email Inbox','Mail Settings',
   'Settings',
   'Revenue Overview','Upcoming Reservations',
@@ -74,20 +75,24 @@ function fmt(dt){ if(!dt) return '—'; const d=new Date(dt);
 
 const RENDER = {
   'Dashboard': async (v)=>{
-    const [sum,rev,today,up] = await Promise.all([
-      api('/api/reports/bookings'), api('/api/reports/revenue'),
-      api('/api/reports/today'), api('/api/reports/upcoming')]);
+    const ov = await api('/api/dashboard/overview?days=7');
+    const s = ov.summary;
+    const money2 = n => money(n||0);
+    DASH = ov; // keep for tab switching
     v.innerHTML = `
       <div class="grid g4" style="margin-bottom:20px">
-        <div class="stat"><div class="k">Bookings · 24h</div><div class="v">${sum.daily}</div></div>
-        <div class="stat"><div class="k">Bookings · 7d</div><div class="v">${sum.weekly}</div></div>
-        <div class="stat"><div class="k">Revenue</div><div class="v">${money(rev.revenue)}</div></div>
-        <div class="stat"><div class="k">Deposits held</div><div class="v">${money(rev.deposits_held)}</div></div>
+        <div class="stat"><div class="k">Ture (7 dana)</div><div class="v">${s.tours}</div></div>
+        <div class="stat"><div class="k">Plaćeno online</div><div class="v">${money2(s.paid_total)}</div></div>
+        <div class="stat"><div class="k">Za naplatiti</div><div class="v" style="color:var(--accent)">${money2(s.to_collect_total)}</div></div>
+        <div class="stat"><div class="k">Partner ture</div><div class="v">${s.partner_tours}</div></div>
       </div>
-      <div class="grid g2">
-        <div class="panel"><h3>Today's Reservations</h3>${bookingTable(today)}</div>
-        <div class="panel"><h3>Upcoming</h3>${bookingTable(up.slice(0,8))}</div>
-      </div>`;
+      <div class="toolbar" style="gap:6px;margin-bottom:14px">
+        <button class="btn btn-sm" id="tab-today" onclick="dashTab('today')">Danas</button>
+        <button class="btn btn-sm btn-ghost" id="tab-tomorrow" onclick="dashTab('tomorrow')">Sutra</button>
+        <button class="btn btn-sm btn-ghost" id="tab-week" onclick="dashTab('week')">Cijeli tjedan</button>
+      </div>
+      <div id="dash-body"></div>`;
+    dashTab('today');
   },
   'Assets': async (v)=>{
     const a = await api('/api/assets');
@@ -274,6 +279,50 @@ const RENDER = {
   },
 };
 
+function dashTab(which){
+  if(!DASH) return;
+  ['today','tomorrow','week'].forEach(t=>{
+    const el=document.getElementById('tab-'+t);
+    if(el) el.className='btn btn-sm'+(t===which?'':' btn-ghost');
+  });
+  let days=[];
+  if(which==='today') days=DASH.days.slice(0,1);
+  else if(which==='tomorrow') days=DASH.days.slice(1,2);
+  else days=DASH.days;
+  const body=document.getElementById('dash-body'); if(!body)return;
+  body.innerHTML = days.map(renderDay).join('') || '<div class="empty">Nema tura</div>';
+}
+function renderDay(d){
+  const head=`<div style="display:flex;align-items:baseline;gap:8px;margin:18px 0 8px">
+    <span style="font-weight:700;font-size:15px">${d.label}</span>
+    <span style="color:var(--mut);font-size:13px">${d.date_label}</span>
+    <span style="color:var(--mut);font-size:13px;margin-left:auto">${d.count} ${d.count===1?'tura':'tura'}</span></div>`;
+  if(!d.tours.length) return head+'<div class="empty" style="padding:14px">Nema tura</div>';
+  return head + '<div class="panel" style="padding:0;overflow:hidden">' +
+    d.tours.map(renderTour).join('') + '</div>';
+}
+function renderTour(t){
+  const isP = t.provider_type==='partner';
+  const badge = isP
+    ? `<span class="badge-off" style="background:rgba(199,154,60,.15);color:#9a7424">PARTNER${t.provider_name?' · '+t.provider_name:''}</span>`
+    : `<span class="badge-live">VLASTITO</span>`;
+  const collect = t.to_collect>0
+    ? `<span style="color:var(--accent);font-weight:700">${money(t.to_collect)}</span>` : '—';
+  const vbtn = isP ? `<button class="btn btn-sm btn-ghost" onclick="openVoucher(${t.booking_id})">Voucher</button>` : '';
+  return `<div style="display:flex;align-items:center;gap:14px;padding:13px 16px;border-bottom:1px solid var(--line)">
+    <div style="min-width:54px;font-weight:700;font-size:15px">${t.time}${t.end_time?`<div style="font-size:11px;color:var(--mut);font-weight:400">${t.end_time}</div>`:''}</div>
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:600">${t.asset} ${t.tour?`<span style="color:var(--mut);font-weight:400">· ${t.tour}</span>`:''}</div>
+      <div style="font-size:13px;color:var(--mut)">${t.guest} · ${t.guests} os.${t.phone?' · '+t.phone:''}${t.pickup?' · 📍 '+t.pickup:''}</div>
+      <div style="margin-top:3px">${badge}</div>
+    </div>
+    <div style="text-align:right;font-size:13px;min-width:120px">
+      <div style="color:var(--mut)">Plaćeno: <b style="color:var(--ink)">${money(t.paid)}</b></div>
+      <div style="color:var(--mut)">Naplatiti: ${collect}</div>
+    </div>
+    ${vbtn}
+  </div>`;
+}
 function bookingTable(b, full){
   if(!b||!b.length) return '<div class="empty">No reservations</div>';
   return `<table><thead><tr><th>#</th><th>Asset</th><th>Package</th><th>Start</th><th>End</th>
