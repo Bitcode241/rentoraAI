@@ -123,8 +123,37 @@ def partner_voucher(booking_id: int, token: str = "",
     total = b.total_price or 0
     paid = b.amount_paid or 0
     balance = max(total - paid, 0) if paid > 0 else 0
-    from app.services import settings_service
+    from app.services import settings_service, provider_service
     biz = settings_service.brand_for_type(db, asset.asset_type if asset else "")
+
+    # Partner provider tour -> the legally-structured partner voucher (intermediary
+    # + provider OIB + split payment). Blocks if provider data is missing.
+    if asset and provider_service.is_partner(asset):
+        problems = provider_service.validate_partner_asset(asset)
+        if problems:
+            raise HTTPException(
+                400, "Voucher se ne može izdati — nedostaju podaci izvođača: "
+                + ", ".join(problems))
+        amt = provider_service.partner_amounts(asset)
+        qty = 1  # this endpoint is per-booking; group vouchers go through payment flow
+        biz_oib = settings_service.get(db, "business_oib", "") or ""
+        try:
+            pdf = voucher_service.build_partner_voucher(
+                business_name=biz, business_oib=biz_oib, booking_id=b.id,
+                asset_name=asset.name, when=when, guests=getattr(b, "passengers", 0) or "—",
+                tour_name=tour, guest_name=gname,
+                guest_phone=(cust.phone if cust else "") or "",
+                provider_name=asset.provider_name, provider_oib=asset.provider_oib,
+                my_commission=amt["commission"], pay_on_site=amt["pay_on_site"],
+                total_price=amt["total"],
+                pickup_location=getattr(b, "pickup_location", "") or "",
+                transfer_note=getattr(b, "transfer_note", "") or "", currency="EUR")
+        except voucher_service.PartnerVoucherError as e:
+            raise HTTPException(400, "Voucher blokiran: nedostaju podaci izvođača.")
+        return Response(content=pdf, media_type="application/pdf",
+                        headers={"Content-Disposition":
+                                 f'inline; filename="voucher-{b.id}.pdf"'})
+
     pdf = voucher_service.build_voucher(
         business_name=biz,
         booking_id=b.id, asset_name=asset.name if asset else "—", when=when,

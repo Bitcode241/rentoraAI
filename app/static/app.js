@@ -211,6 +211,7 @@ const RENDER = {
       <label>Brodovi</label><input id="set_brand_boat" value="${biz.brand_boat||''}" placeholder="Seagull Dubrovnik">
       <label>Jet ski</label><input id="set_brand_jetski" value="${biz.brand_jetski||''}" placeholder="Jetski Dubrovnik">
       <label>Transferi</label><input id="set_brand_transfer" value="${biz.brand_transfer||''}" placeholder="Ragusa Transfer">
+      <label>OIB agencije (za partnerski voucher)</label><input id="set_oib" value="${biz.business_oib||''}" placeholder="99999999999">
       <label>Zadani depozit (%)</label><input id="set_dep" type="number" min="0" max="100" value="${biz.default_deposit_percent||30}">
       <label>Jet ski — doplata za 2. osobu (€)</label><input id="set_extra" type="number" min="0" step="1" value="${biz.jetski_extra_person_fee!=null?biz.jetski_extra_person_fee:20}">
       <div style="margin:12px 0 20px"><button class="btn" onclick="saveBusiness()">Spremi brendove</button>
@@ -902,6 +903,7 @@ async function saveBusiness(){
       brand_boat:val('set_brand_boat'),
       brand_jetski:val('set_brand_jetski'),
       brand_transfer:val('set_brand_transfer'),
+      business_oib:val('set_oib'),
       jetski_extra_person_fee:+val('set_extra')||0,
       default_deposit_percent:+val('set_dep')||30})});
     const m=document.getElementById('biz_msg'); if(m) m.textContent='Spremljeno ✓';

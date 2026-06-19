@@ -1357,3 +1357,54 @@ def test_partner_booking_blocked_without_oib(monkeypatch):
                        request=None, db=db)
     assert r["error"] == "partner_data_missing"
     db.close()
+
+
+def test_business_oib_setting():
+    from app.core.database import SessionLocal
+    from app.services import settings_service as ss
+    db = SessionLocal()
+    ss.set(db, "business_oib", "99999999999")
+    assert ss.get(db, "business_oib") == "99999999999"
+    db.close()
+
+
+def test_manual_voucher_partner_vs_block():
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.models.booking import Booking
+    from app.models.user import User
+    from app.api.routes.bookings import partner_voucher
+    from app.core.security import create_access_token, hash_password
+    from fastapi import HTTPException
+    from datetime import datetime, timedelta
+    db = SessionLocal()
+    u = db.query(User).first()
+    if not u:
+        u = User(username="admin", hashed_password=hash_password("x"), role="admin")
+        db.add(u); db.commit()
+    tok = create_access_token(u.username, u.role)
+    boat = db.query(Asset).filter(Asset.asset_type == "boat").first()
+    boat.provider_type = "partner"; boat.provider_name = "Galeb"
+    boat.provider_oib = "12345678901"; boat.partner_total_price = 500
+    boat.my_commission = 200
+    db.commit()
+    c = Customer(full_name="G", email="mv@x.com", phone="+385")
+    db.add(c); db.commit(); db.refresh(c)
+    bk = Booking(asset_id=boat.id, customer_id=c.id,
+                 start_datetime=datetime.now() + timedelta(days=3),
+                 end_datetime=datetime.now() + timedelta(days=3, hours=8),
+                 total_price=500, amount_paid=200, passengers=6,
+                 package_name="Full day")
+    db.add(bk); db.commit(); db.refresh(bk)
+    r = partner_voucher(bk.id, token=tok, db=db)
+    assert r.body and len(r.body) > 1000
+    # remove OIB -> blocked
+    boat.provider_oib = ""
+    db.commit()
+    try:
+        partner_voucher(bk.id, token=tok, db=db)
+        assert False
+    except HTTPException as e:
+        assert e.status_code == 400
+    db.close()
