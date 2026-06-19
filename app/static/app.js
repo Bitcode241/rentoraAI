@@ -357,6 +357,8 @@ async function assetModal(id){
         </select>
       </div>
     </div>
+    ${id?`
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
       <label style="font-weight:600">Packages</label>
       <div id="m_pkgs" style="font-size:13px;margin:6px 0">loading…</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:end;margin-top:6px">
