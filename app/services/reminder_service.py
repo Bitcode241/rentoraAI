@@ -36,11 +36,15 @@ def find_tomorrow_bookings(db: Session):
     start_win = now + timedelta(hours=12)
     end_win = now + timedelta(hours=36)
     rows = db.query(Booking).filter(
-        Booking.status == "confirmed",
+        Booking.status != "cancelled",
         Booking.reminder_sent == False,  # noqa: E712
         Booking.start_datetime >= start_win,
         Booking.start_datetime <= end_win,
     ).all()
+    # only remind bookings that are actually going ahead (paid a deposit or confirmed)
+    rows = [b for b in rows
+            if b.status == "confirmed"
+            or (b.payment_status in ("deposit_paid", "paid"))]
     return rows
 
 
@@ -100,7 +104,14 @@ def send_reminders(db: Session, manager=None, business_name="Rentora") -> dict:
             if b.package_name:
                 gdetails += f"\n{b.package_name}"
             body = tmpl.format(details=gdetails, business=business_name)
-            manager.reply_from(gbox, cust.email, subj, body)
+            # attach the voucher so the guest already has it on their phone
+            vpdf = _build_reminder_voucher(db, b, asset, cust, business_name)
+            if vpdf:
+                manager.reply_from(gbox, cust.email, subj, body,
+                                   attachment=vpdf,
+                                   attachment_name=f"voucher_{b.id}.pdf")
+            else:
+                manager.reply_from(gbox, cust.email, subj, body)
             guest_count += 1
 
         b.reminder_sent = True
@@ -134,3 +145,43 @@ def send_reminders(db: Session, manager=None, business_name="Rentora") -> dict:
              partners=partner_sent, bookings=len(bookings))
     return {"owner": owner_sent, "guests": guest_count, "partners": partner_sent,
             "bookings": len(bookings)}
+
+
+def _build_reminder_voucher(db, booking, asset, cust, business_name):
+    """Build a voucher PDF to attach to the day-before reminder.
+    Partner tour -> partner voucher with QR. Own tour -> no attachment (guest
+    already received the confirmation PDF after payment). Returns bytes or None."""
+    import os
+    from app.services import provider_service, voucher_service, settings_service, voucher_qr_service
+    from app.core.timeutil import fmt_local
+    if not asset or not provider_service.is_partner(asset):
+        return None
+    if provider_service.validate_partner_asset(asset):
+        return None  # missing provider data -> don't issue
+    amt = provider_service.partner_amounts(asset)
+    biz = settings_service.brand_for_type(db, asset.asset_type)
+    biz_oib = settings_service.get(db, "business_oib", "") or ""
+    vtoken = voucher_qr_service.get_or_create_token(db, booking)
+    base = settings_service.get(db, "public_base_url", "") or os.getenv("PUBLIC_BASE_URL", "")
+    qr_img = None
+    if base:
+        try:
+            qr_img = voucher_qr_service.qr_png(voucher_qr_service.voucher_url(base, vtoken))
+        except Exception:
+            qr_img = None
+    try:
+        return voucher_service.build_partner_voucher(
+            business_name=biz, business_oib=biz_oib, booking_id=booking.id,
+            asset_name=asset.name, when=fmt_local(booking.start_datetime),
+            guests=getattr(booking, "passengers", 0) or "—",
+            tour_name=booking.package_name or "",
+            guest_name=(cust.full_name or "") if (cust and cust.full_name != cust.email) else "",
+            guest_phone=(cust.phone if cust else "") or "",
+            provider_name=asset.provider_name, provider_oib=asset.provider_oib,
+            my_commission=amt["commission"], pay_on_site=amt["pay_on_site"],
+            total_price=amt["total"],
+            pickup_location=getattr(booking, "pickup_location", "") or "",
+            qr_png=qr_img, currency="EUR")
+    except Exception as e:
+        log.warning("reminder_voucher_failed", booking_id=booking.id, error=str(e))
+        return None

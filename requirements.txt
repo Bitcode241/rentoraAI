@@ -23,3 +23,4 @@ pytest-asyncio==0.23.7
 apscheduler==3.10.4
 stripe>=8.0.0
 reportlab>=4.0.0
+qrcode>=7.4

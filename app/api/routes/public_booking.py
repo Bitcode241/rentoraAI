@@ -149,6 +149,17 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
         st = local_to_utc(st)  # widget time is local Zagreb wall-clock
     except Exception:
         return {"error": "bad_date"}
+    # never allow booking in the past, or sooner than this asset's lead time
+    from datetime import timezone as _tz
+    now_utc = datetime.now(_tz.utc)
+    if st.tzinfo is None:
+        st = st.replace(tzinfo=_tz.utc)
+    lead_h = settings_service.lead_time_hours(db, anchor.asset_type)
+    earliest = now_utc + timedelta(hours=lead_h)
+    if st < now_utc:
+        return {"error": "past_date"}
+    if st < earliest:
+        return {"error": "too_soon", "lead_time_hours": lead_h}
     pkgs = {p["package_id"]: p for p in pricing.list_packages(anchor)}
     pkg = pkgs.get(int(payload.get("package_id", 0)))
     if not pkg:
@@ -319,6 +330,58 @@ widget_router = _AR(tags=["widget"])
 @widget_router.get("/book/{asset_type}")
 def widget_page(asset_type: str):
     return FileResponse("app/static/widget.html", media_type="text/html")
+
+
+@widget_router.get("/v/{token}")
+def voucher_view_page(token: str):
+    """Public skipper-facing page reached by scanning the voucher QR."""
+    return FileResponse("app/static/voucher_view.html", media_type="text/html")
+
+
+@widget_router.get("/api/v/{token}")
+def voucher_view_data(token: str, db: Session = Depends(get_db)):
+    """Booking details for the skipper view. Token is the booking's voucher_token
+    (unguessable) — no login needed, but only this booking is exposed."""
+    from app.models.booking import Booking
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.core.timeutil import fmt_local
+    from app.services import provider_service, settings_service
+    b = db.query(Booking).filter(Booking.voucher_token == token).first()
+    if not token or not b:
+        return {"ok": False}
+    a = db.get(Asset, b.asset_id)
+    c = db.get(Customer, b.customer_id)
+    is_partner = bool(a and provider_service.is_partner(a))
+    if is_partner and a:
+        amt = provider_service.partner_amounts(a)
+        to_collect = amt["pay_on_site"]
+        total = amt["total"]
+        commission = amt["commission"]
+    else:
+        total = b.total_price or 0
+        to_collect = max(total - (b.amount_paid or 0), 0)
+        commission = b.amount_paid or 0
+    return {
+        "ok": True,
+        "booking_id": b.id,
+        "business": settings_service.brand_for_type(db, a.asset_type if a else ""),
+        "asset": a.name if a else "—",
+        "tour": b.package_name or "",
+        "when": fmt_local(b.start_datetime),
+        "guests": b.passengers or 0,
+        "guest": (c.full_name if c and c.full_name and c.full_name != (c.email or "")
+                  else (c.email if c else "—")),
+        "phone": (c.phone if c else "") or "",
+        "provider_type": "partner" if is_partner else "own",
+        "provider_name": (a.provider_name if is_partner and a else ""),
+        "paid_online": round(commission, 2),
+        "to_collect": round(to_collect, 2),
+        "total": round(total, 2),
+        "pickup": getattr(b, "pickup_location", "") or "",
+        "note": getattr(b, "transfer_note", "") or "",
+        "currency": "EUR",
+    }
 
 
 from fastapi.responses import HTMLResponse

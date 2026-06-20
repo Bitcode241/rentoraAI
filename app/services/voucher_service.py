@@ -164,6 +164,7 @@ def build_partner_voucher(*, business_name, business_oib="", booking_id,
                           provider_name="", provider_oib="",
                           my_commission=0.0, pay_on_site=0.0, total_price=0.0,
                           pickup_location="", transfer_note="",
+                          qr_png=None,
                           currency="EUR") -> bytes:
     """Legally-structured PARTNER voucher (NOT a fiscal receipt).
 
@@ -292,10 +293,25 @@ def build_partner_voucher(*, business_name, business_oib="", booking_id,
 
     y -= box_h + 12 * mm
 
-    # ---- mandatory note ----
+    # ---- mandatory note + QR ----
     c.setFillColor(ink)
     c.setFont(font_bold, 11)
     c.drawString(20 * mm, y, "Ovaj voucher predočite izvođaču pri dolasku.")
+
+    if qr_png:
+        try:
+            from reportlab.lib.utils import ImageReader
+            qr_size = 30 * mm
+            qr_x = w - 24 * mm - qr_size
+            qr_y = y - qr_size + 4 * mm
+            c.drawImage(ImageReader(io.BytesIO(qr_png)), qr_x, qr_y,
+                        qr_size, qr_size, mask="auto")
+            c.setFont(font_reg, 7.5)
+            c.setFillColor(grey)
+            c.drawCentredString(qr_x + qr_size / 2, qr_y - 4 * mm,
+                                "Skenirajte za detalje")
+        except Exception:
+            pass
     y -= 12 * mm
 
     # ---- non-fiscal footer ----

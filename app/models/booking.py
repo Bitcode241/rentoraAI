@@ -29,6 +29,9 @@ class Booking(Base):
     transfer_note: Mapped[str] = mapped_column(String(255), default="")
     passengers: Mapped[int] = mapped_column(Integer, default=0)
     pickup_location: Mapped[str] = mapped_column(String(255), default="")
+    # public token embedded in the voucher QR; lets a skipper view the booking
+    # details by scanning, without logging in. Generated on first voucher build.
+    voucher_token: Mapped[str] = mapped_column(String(64), default="", index=True)
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     asset = relationship("Asset")

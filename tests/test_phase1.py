@@ -1448,3 +1448,107 @@ def test_dashboard_overview():
     partner_tour = next(t for t in all_tours if t["provider_type"] == "partner")
     assert partner_tour["to_collect"] == 300.0
     db.close()
+
+
+def test_voucher_qr_and_skipper_view():
+    """Voucher gets a QR token; the skipper view exposes booking by that token."""
+    import os
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.models.booking import Booking
+    from app.models.user import User
+    from app.core.security import create_access_token, hash_password
+    from app.api.routes.bookings import partner_voucher
+    from app.api.routes.public_booking import voucher_view_data
+    from datetime import datetime, timedelta
+    os.environ["PUBLIC_BASE_URL"] = "https://app.rentoraai.com"
+    db = SessionLocal()
+    u = db.query(User).first()
+    if not u:
+        u = User(username="admin", hashed_password=hash_password("x"), role="admin")
+        db.add(u); db.commit()
+    tok = create_access_token(u.username, u.role)
+    boat = db.query(Asset).filter(Asset.asset_type == "boat").first()
+    boat.provider_type = "partner"; boat.provider_name = "Galeb"
+    boat.provider_oib = "12345678901"; boat.partner_total_price = 500
+    boat.my_commission = 200
+    db.commit()
+    c = Customer(full_name="Marko", email="qr@x.com", phone="+385")
+    db.add(c); db.commit(); db.refresh(c)
+    bk = Booking(asset_id=boat.id, customer_id=c.id,
+                 start_datetime=datetime.now() + timedelta(days=2),
+                 end_datetime=datetime.now() + timedelta(days=2, hours=8),
+                 total_price=500, amount_paid=200, passengers=6,
+                 package_name="Full day")
+    db.add(bk); db.commit(); db.refresh(bk)
+    r = partner_voucher(bk.id, token=tok, db=db)
+    assert r.body and len(r.body) > 1000
+    db.refresh(bk)
+    assert bk.voucher_token  # token generated
+    vd = voucher_view_data(bk.voucher_token, db=db)
+    assert vd["ok"] and vd["to_collect"] == 300.0
+    assert vd["provider_name"] == "Galeb"
+    # bad token -> not found
+    assert voucher_view_data("nope", db=db)["ok"] is False
+    db.close()
+
+
+def test_reminder_finds_paid_and_builds_voucher():
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.models.booking import Booking
+    from app.services import reminder_service
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    boat = db.query(Asset).filter(Asset.asset_type == "boat").first()
+    boat.provider_type = "partner"; boat.provider_name = "Galeb"
+    boat.provider_oib = "12345678901"; boat.partner_total_price = 500
+    boat.my_commission = 200
+    db.commit()
+    c = Customer(full_name="Ana", email="rem@x.com", phone="+385", language="hr")
+    db.add(c); db.commit(); db.refresh(c)
+    now = datetime.now(timezone.utc)
+    bk = Booking(asset_id=boat.id, customer_id=c.id,
+                 start_datetime=now + timedelta(hours=20),
+                 end_datetime=now + timedelta(hours=28), total_price=500,
+                 amount_paid=200, status="pending", payment_status="deposit_paid",
+                 passengers=6, package_name="Full day")
+    db.add(bk); db.commit(); db.refresh(bk)
+    found = reminder_service.find_tomorrow_bookings(db)
+    assert any(x.id == bk.id for x in found)  # paid deposit is reminded
+    v = reminder_service._build_reminder_voucher(db, bk, boat, c, "Seagull")
+    assert v and len(v) > 1000  # partner voucher built
+    db.close()
+
+
+def test_widget_blocks_past_and_too_soon(monkeypatch):
+    """The widget must reject past dates and bookings sooner than the lead time."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.api.routes import public_booking as pb
+    from app.core.timeutil import to_local
+    from datetime import datetime, timezone, timedelta
+    import app.services.payment_service as ps
+    monkeypatch.setattr(ps, "create_deposit_checkout",
+                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None: {"url": "http://t", "session_id": "x"})
+    db = SessionLocal()
+    for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
+        j.model_group = "yamaha-vx"
+    db.commit()
+    anchor = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    pkg = pb.public_assets("jetski", db=db)[0]["packages"][1]
+    base = {"asset_id": anchor.id, "package_id": pkg["id"], "qty": 1,
+            "passengers": 1, "name": "A", "email": "t@x.com", "phone": "1"}
+    now_local = to_local(datetime.now(timezone.utc))
+    # past
+    past = (now_local - timedelta(days=1)).strftime("%Y-%m-%dT09:00:00")
+    assert pb.public_book({**base, "start": past}, request=None, db=db)["error"] == "past_date"
+    # too soon (30 min, jet lead = 2h)
+    soon = (now_local + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%S")
+    assert pb.public_book({**base, "start": soon}, request=None, db=db)["error"] == "too_soon"
+    # ok tomorrow
+    ok = (now_local + timedelta(days=1)).strftime("%Y-%m-%dT09:00:00")
+    assert pb.public_book({**base, "start": ok}, request=None, db=db).get("ok")
+    db.close()

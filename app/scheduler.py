@@ -28,9 +28,11 @@ def _poll_email_job():
 
 def _daily_reminder_job():
     from app.services.reminder_service import send_reminders
+    from app.services import settings_service
     db = SessionLocal()
     try:
-        result = send_reminders(db)
+        biz = settings_service.business_name(db) or "Rentora"
+        result = send_reminders(db, business_name=biz)
         if result.get("bookings"):
             log.info("scheduled_reminders", **result)
     except Exception as e:  # pragma: no cover

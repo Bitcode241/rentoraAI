@@ -113,6 +113,16 @@ def _send_voucher(db, booking, group=None):
     from app.core.timeutil import fmt_local
     business = settings_service.brand_for_type(db, asset.asset_type)
     business_oib = settings_service.get(db, "business_oib", "") or ""
+    from app.services import voucher_qr_service
+    vtoken = voucher_qr_service.get_or_create_token(db, booking)
+    import os as _os
+    base = settings_service.get(db, "public_base_url", "") or _os.getenv("PUBLIC_BASE_URL", "")
+    qr_img = None
+    if base:
+        try:
+            qr_img = voucher_qr_service.qr_png(voucher_qr_service.voucher_url(base, vtoken))
+        except Exception:
+            qr_img = None
     try:
         pdf = voucher_service.build_partner_voucher(
             business_name=business, business_oib=business_oib,
@@ -127,7 +137,7 @@ def _send_voucher(db, booking, group=None):
             pay_on_site=round(amt["pay_on_site"] * qty, 2),
             total_price=round(amt["total"] * qty, 2),
             pickup_location=getattr(booking, "pickup_location", "") or "",
-            currency="EUR")
+            qr_png=qr_img, currency="EUR")
     except voucher_service.PartnerVoucherError as e:
         log.warning("partner_voucher_blocked", booking_id=booking.id, reason=str(e))
         return

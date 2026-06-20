@@ -137,6 +137,18 @@ def partner_voucher(booking_id: int, token: str = "",
         amt = provider_service.partner_amounts(asset)
         qty = 1  # this endpoint is per-booking; group vouchers go through payment flow
         biz_oib = settings_service.get(db, "business_oib", "") or ""
+        # QR -> public skipper view
+        from app.services import voucher_qr_service
+        vtoken = voucher_qr_service.get_or_create_token(db, b)
+        base = settings_service.get(db, "public_base_url", "") or \
+            __import__("os").getenv("PUBLIC_BASE_URL", "")
+        qr_img = None
+        if base:
+            try:
+                qr_img = voucher_qr_service.qr_png(
+                    voucher_qr_service.voucher_url(base, vtoken))
+            except Exception:
+                qr_img = None
         try:
             pdf = voucher_service.build_partner_voucher(
                 business_name=biz, business_oib=biz_oib, booking_id=b.id,
@@ -147,7 +159,8 @@ def partner_voucher(booking_id: int, token: str = "",
                 my_commission=amt["commission"], pay_on_site=amt["pay_on_site"],
                 total_price=amt["total"],
                 pickup_location=getattr(b, "pickup_location", "") or "",
-                transfer_note=getattr(b, "transfer_note", "") or "", currency="EUR")
+                transfer_note=getattr(b, "transfer_note", "") or "",
+                qr_png=qr_img, currency="EUR")
         except voucher_service.PartnerVoucherError as e:
             raise HTTPException(400, "Voucher blokiran: nedostaju podaci izvođača.")
         return Response(content=pdf, media_type="application/pdf",
