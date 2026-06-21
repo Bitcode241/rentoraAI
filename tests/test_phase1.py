@@ -1552,3 +1552,15 @@ def test_widget_blocks_past_and_too_soon(monkeypatch):
     ok = (now_local + timedelta(days=1)).strftime("%Y-%m-%dT09:00:00")
     assert pb.public_book({**base, "start": ok}, request=None, db=db).get("ok")
     db.close()
+
+
+def test_config_exposes_time_settings():
+    """The widget config must expose lead time and working hours for the slots."""
+    from app.core.database import SessionLocal
+    from app.api.routes import public_booking as pb
+    db = SessionLocal()
+    cfg = pb.public_config("jetski", db=db)
+    assert "lead_time_hours" in cfg
+    assert "open_hour" in cfg and "close_hour" in cfg
+    assert cfg["open_hour"] < cfg["close_hour"]
+    db.close()

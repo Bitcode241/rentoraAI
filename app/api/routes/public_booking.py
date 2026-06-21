@@ -28,6 +28,9 @@ def public_config(asset_type: str = "jetski", db: Session = Depends(get_db)):
         "accent": settings_service.widget_accent(db, asset_type),
         "deposit_percent": settings_service.default_deposit_percent(db),
         "extra_person_fee": settings_service.jetski_extra_person_fee(db),
+        "lead_time_hours": settings_service.lead_time_hours(db, asset_type),
+        "open_hour": int(settings_service.get(db, "open_hour", "8") or 8),
+        "close_hour": int(settings_service.get(db, "close_hour", "20") or 20),
         "currency": "EUR",
     }
 
