@@ -26,6 +26,7 @@ T = {
         "full_price": "Ukupna cijena",
         "balance": "Za platiti na licu mjesta",
         "transfer_inc": "Transfer uključen",
+        "extras": "Dodatno",
         "paid_badge": "PLAĆENO",
         "yes": "Da", "no": "Ne",
         "location": "Lokacija polaska",
@@ -48,6 +49,7 @@ T = {
         "full_price": "Total price",
         "balance": "Balance due on site",
         "transfer_inc": "Transfer included",
+        "extras": "Extras",
         "paid_badge": "PAID",
         "yes": "Yes", "no": "No",
         "location": "Departure location",
@@ -70,6 +72,7 @@ T = {
         "full_price": "Gesamtpreis",
         "balance": "Restzahlung vor Ort",
         "transfer_inc": "Transfer inklusive",
+        "extras": "Zusätzlich",
         "paid_badge": "BEZAHLT",
         "yes": "Ja", "no": "Nein",
         "location": "Abfahrtsort",
@@ -176,9 +179,15 @@ def build_pdf(*, lang, business_name, booking_id, asset_name, when, guests,
     ]
     if package:
         rows.append((tr["package"], package))
-    # Transfer row ONLY when a transfer is actually part of the booking.
-    if transfer_included:
-        rows.append((tr["transfer_inc"], transfer_note or tr["yes"]))
+    # Extras / transfer row. The note can carry add-ons, an extra-person fee,
+    # and/or a transfer. Label it "Transfer" only when it's actually a transfer;
+    # otherwise use a neutral "Dodatno / Extras" label so we never mislabel fees.
+    if transfer_note:
+        note_l = transfer_note.lower()
+        label = tr["transfer_inc"] if "transfer" in note_l else tr["extras"]
+        rows.append((label, transfer_note))
+    elif transfer_included:
+        rows.append((tr["transfer_inc"], tr["yes"]))
     if location:
         rows.append((tr["location"], location))
     # Guest contact details — so the skipper can reach them on the day.

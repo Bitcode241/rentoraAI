@@ -1564,3 +1564,54 @@ def test_config_exposes_time_settings():
     assert "open_hour" in cfg and "close_hour" in cfg
     assert cfg["open_hour"] < cfg["close_hour"]
     db.close()
+
+
+def test_pdf_extra_person_not_labeled_transfer():
+    """An extra-person fee must NOT be labeled as a transfer in the PDF."""
+    from app.services import confirmation_service as cs
+    # build with only an extra-person note (no real transfer)
+    pdf = cs.build_pdf(lang="hr", business_name="X", booking_id=1,
+                       asset_name="Yamaha VX", when="", guests=2, package="1h",
+                       deposit_paid=42, full_price=160, balance=118,
+                       transfer_included=True, location="", phone="", guest_name="",
+                       guest_email="", transfer_note="Dodatna osoba (2/jet): +20.00 EUR",
+                       currency="EUR")
+    # extract text to verify the label
+    import io
+    from pypdf import PdfReader
+    txt = "".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages)
+    assert "Dodatna osoba" in txt
+    # the extras line should be under DODATNO, not mislabeled — transfer label
+    # should not appear for a pure extra-person fee
+    assert "Transfer uklju" not in txt
+
+
+def test_meeting_arranged_flow(monkeypatch):
+    """When meeting point is arranged privately, the widget config flags it and
+    the booking is marked so the owner knows to call."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.booking import Booking
+    from app.services import settings_service
+    from app.api.routes import public_booking as pb
+    import app.services.payment_service as ps
+    from datetime import date, timedelta
+    monkeypatch.setattr(ps, "create_deposit_checkout",
+                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None: {"url": "http://t", "session_id": "x"})
+    db = SessionLocal()
+    for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
+        j.model_group = "yamaha-vx"
+    settings_service.set(db, "meeting_arranged", "1")
+    db.commit()
+    cfg = pb.public_config("jetski", db=db)
+    assert cfg["meeting_arranged"] is True
+    anchor = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    pkg = pb.public_assets("jetski", db=db)[0]["packages"][1]
+    tom = (date.today() + timedelta(days=2)).isoformat()
+    r = pb.public_book({"asset_id": anchor.id, "package_id": pkg["id"],
+                        "start": tom + "T10:00:00", "qty": 1, "passengers": 1,
+                        "name": "A", "email": "ma@x.com", "phone": "1"},
+                       request=None, db=db)
+    b = db.get(Booking, r["booking_id"])
+    assert b.pickup_location == "Dogovor s gostom"
+    db.close()

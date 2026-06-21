@@ -129,6 +129,7 @@
         <label class="fl" style="margin-top:12px;display:block">Vrijeme</label>
         <div id="timeslots" class="timeslots"></div>
         <input type="hidden" id="time" value="09:00">
+        <div id="meeting-note" style="display:none;margin-top:12px;padding:11px 13px;background:rgba(14,165,183,.07);border:1px solid var(--accent);border-radius:10px;font-size:13px;color:var(--accent-dark)"></div>
         <label class="fl">Broj osoba</label>
         <div class="qty">
           <button onclick="chPax(-1)">−</button><span id="pax">1</span><button onclick="chPax(1)">+</button>
@@ -198,7 +199,7 @@ const I18N={
     date:'Datum',time:'Vrijeme',people:'Broj osoba',name:'Ime i prezime',email:'Email',
     phone:'Telefon (WhatsApp/Viber)',total:'Ukupno',next:'Dalje',pay:'Plati depozit',
     upto:'do',persons:'osoba',deposit:'depozit',from:'od',perPerson:'po osobi',
-    extraPerson:'za dodatnu osobu',pastDate:'Ne možete rezervirati datum u prošlosti. Odaberite budući termin.',noSlotsToday:'Danas nema slobodnih termina — odaberite drugi datum.',tooSoon:'Rezervacija mora biti najmanje {h}h unaprijed. Odaberite kasniji termin.',trTitle:'Trebate li transfer?',trSub:'Upišite odakle vas vozimo i izračunat ćemo cijenu.',trCalc:'Izračunaj',trRound:'Povratni prijevoz (tamo i natrag)',trPrice:'Transfer',trRemove:'ukloni',trUnknown:'Za tu lokaciju javit ćemo cijenu emailom.',qty:'Koliko komada',fleet:'u floti',freeNow:n=>`${n} slobodno za ovaj termin`,
+    extraPerson:'za dodatnu osobu',pastDate:'Ne možete rezervirati datum u prošlosti. Odaberite budući termin.',noSlotsToday:'Danas nema slobodnih termina — odaberite drugi datum.',meetingArranged:'📍 Točno mjesto polaska dogovaramo s Vama nakon rezervacije.',tooSoon:'Rezervacija mora biti najmanje {h}h unaprijed. Odaberite kasniji termin.',trTitle:'Trebate li transfer?',trSub:'Upišite odakle vas vozimo i izračunat ćemo cijenu.',trCalc:'Izračunaj',trRound:'Povratni prijevoz (tamo i natrag)',trPrice:'Transfer',trRemove:'ukloni',trUnknown:'Za tu lokaciju javit ćemo cijenu emailom.',qty:'Koliko komada',fleet:'u floti',freeNow:n=>`${n} slobodno za ovaj termin`,
     checking:'Provjeravam…',free:'✓ Slobodno za odabrani termin',busy:'✗ Zauzeto — probaj drugi termin',
     noUnits:'Trenutno nema dostupnih jedinica.',noAddons:'Nema dodataka.',min:'min',
     depNow:n=>`Sada platiš depozit ${n} · ostatak na licu mjesta`,loading:'Učitavam…',
@@ -210,7 +211,7 @@ const I18N={
     date:'Date',time:'Time',people:'Guests',name:'Full name',email:'Email',
     phone:'Phone (WhatsApp/Viber)',total:'Total',next:'Next',pay:'Pay deposit',
     upto:'up to',persons:'guests',deposit:'deposit',from:'from',perPerson:'per person',
-    extraPerson:'for extra person',pastDate:'You can\'t book a date in the past. Please choose an upcoming time.',noSlotsToday:'No times left today — please choose another date.',tooSoon:'Bookings must be at least {h}h in advance. Please pick a later time.',trTitle:'Need a transfer?',trSub:'Enter your pickup location and we\'ll price it.',trCalc:'Calculate',trRound:'Round trip (there and back)',trPrice:'Transfer',trRemove:'remove',trUnknown:'We\'ll email you a price for that location.',qty:'How many',fleet:'in fleet',freeNow:n=>`${n} free for this time`,
+    extraPerson:'for extra person',pastDate:'You can\'t book a date in the past. Please choose an upcoming time.',noSlotsToday:'No times left today — please choose another date.',meetingArranged:'📍 We\'ll arrange the exact meeting point with you after booking.',tooSoon:'Bookings must be at least {h}h in advance. Please pick a later time.',trTitle:'Need a transfer?',trSub:'Enter your pickup location and we\'ll price it.',trCalc:'Calculate',trRound:'Round trip (there and back)',trPrice:'Transfer',trRemove:'remove',trUnknown:'We\'ll email you a price for that location.',qty:'How many',fleet:'in fleet',freeNow:n=>`${n} free for this time`,
     checking:'Checking…',free:'✓ Available for this time',busy:'✗ Taken — try another time',
     noUnits:'No units available right now.',noAddons:'No add-ons.',min:'min',
     depNow:n=>`Pay a ${n} deposit now · balance on site`,loading:'Loading…',
@@ -222,7 +223,7 @@ const I18N={
     date:'Datum',time:'Uhrzeit',people:'Personen',name:'Vollständiger Name',email:'E-Mail',
     phone:'Telefon (WhatsApp/Viber)',total:'Gesamt',next:'Weiter',pay:'Anzahlung zahlen',
     upto:'bis',persons:'Personen',deposit:'Anzahlung',from:'ab',perPerson:'pro Person',
-    extraPerson:'für Zusatzperson',pastDate:'Vergangene Termine sind nicht buchbar. Bitte wählen Sie einen zukünftigen Termin.',noSlotsToday:'Heute keine Termine mehr — bitte anderes Datum wählen.',tooSoon:'Buchungen müssen mind. {h}h im Voraus erfolgen. Bitte später wählen.',trTitle:'Transfer benötigt?',trSub:'Abholort eingeben, wir berechnen den Preis.',trCalc:'Berechnen',trRound:'Hin- und Rückfahrt',trPrice:'Transfer',trRemove:'entfernen',trUnknown:'Für diesen Ort senden wir den Preis per E-Mail.',qty:'Wie viele',fleet:'in Flotte',freeNow:n=>`${n} frei für diese Zeit`,
+    extraPerson:'für Zusatzperson',pastDate:'Vergangene Termine sind nicht buchbar. Bitte wählen Sie einen zukünftigen Termin.',noSlotsToday:'Heute keine Termine mehr — bitte anderes Datum wählen.',meetingArranged:'📍 Den genauen Treffpunkt vereinbaren wir nach der Buchung mit Ihnen.',tooSoon:'Buchungen müssen mind. {h}h im Voraus erfolgen. Bitte später wählen.',trTitle:'Transfer benötigt?',trSub:'Abholort eingeben, wir berechnen den Preis.',trCalc:'Berechnen',trRound:'Hin- und Rückfahrt',trPrice:'Transfer',trRemove:'entfernen',trUnknown:'Für diesen Ort senden wir den Preis per E-Mail.',qty:'Wie viele',fleet:'in Flotte',freeNow:n=>`${n} frei für diese Zeit`,
     checking:'Prüfe…',free:'✓ Verfügbar für diese Zeit',busy:'✗ Belegt — andere Zeit wählen',
     noUnits:'Derzeit keine Einheiten verfügbar.',noAddons:'Keine Extras.',min:'Min',
     depNow:n=>`Jetzt ${n} Anzahlung · Rest vor Ort`,loading:'Lädt…',
@@ -272,6 +273,12 @@ async function init(){
     $('date').min=new Date().toISOString().slice(0,10);
     $('date').addEventListener('change',()=>{ renderTimeSlots(); checkAvail(); });
     renderTimeSlots();
+    // meeting-point arranged privately (for spots not advertised online)
+    if(CFG.meeting_arranged){
+      const mn=$('meeting-note');
+      mn.textContent = CFG.meeting_note || T.meetingArranged;
+      mn.style.display='block';
+    }
     // fewer clicks: if there's only one model, select it automatically and
     // jump straight to packages (no need to make the guest pick the obvious one)
     if(ASSETS.length===1){ pickAsset(ASSETS[0].id, true); }

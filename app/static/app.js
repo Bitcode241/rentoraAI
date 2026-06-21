@@ -217,6 +217,11 @@ const RENDER = {
       <label>Jet ski</label><input id="set_brand_jetski" value="${biz.brand_jetski||''}" placeholder="Jetski Dubrovnik">
       <label>Transferi</label><input id="set_brand_transfer" value="${biz.brand_transfer||''}" placeholder="Ragusa Transfer">
       <label>OIB agencije (za partnerski voucher)</label><input id="set_oib" value="${biz.business_oib||''}" placeholder="99999999999">
+      <label style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer">
+        <input id="set_meeting" type="checkbox" style="width:auto" ${biz.meeting_arranged?'checked':''}>
+        Mjesto polaska se dogovara nakon rezervacije (ne prikazuj javno)</label>
+      <label>Poruka gostu o dogovoru lokacije (nije obavezno)</label>
+      <input id="set_meeting_note" value="${biz.meeting_note||''}" placeholder="Točno mjesto polaska dogovaramo nakon rezervacije.">
       <label>Zadani depozit (%)</label><input id="set_dep" type="number" min="0" max="100" value="${biz.default_deposit_percent||30}">
       <label>Jet ski — doplata za 2. osobu (€)</label><input id="set_extra" type="number" min="0" step="1" value="${biz.jetski_extra_person_fee!=null?biz.jetski_extra_person_fee:20}">
       <div style="margin:12px 0 20px"><button class="btn" onclick="saveBusiness()">Spremi brendove</button>
@@ -953,6 +958,8 @@ async function saveBusiness(){
       brand_jetski:val('set_brand_jetski'),
       brand_transfer:val('set_brand_transfer'),
       business_oib:val('set_oib'),
+      meeting_arranged:document.getElementById('set_meeting')?document.getElementById('set_meeting').checked:false,
+      meeting_note:val('set_meeting_note'),
       jetski_extra_person_fee:+val('set_extra')||0,
       default_deposit_percent:+val('set_dep')||30})});
     const m=document.getElementById('biz_msg'); if(m) m.textContent='Spremljeno ✓';

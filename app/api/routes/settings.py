@@ -38,6 +38,8 @@ def get_business(db: Session = Depends(get_db), _=Depends(get_current_user)):
     return {
         "business_name": settings_service.business_name(db),
         "business_oib": settings_service.get(db, "business_oib", "") or "",
+        "meeting_arranged": (settings_service.get(db, "meeting_arranged", "0") or "0") == "1",
+        "meeting_note": settings_service.get(db, "meeting_note", "") or "",
         "default_deposit_percent": settings_service.default_deposit_percent(db),
         "jetski_extra_person_fee": settings_service.jetski_extra_person_fee(db),
         "brand_boat": settings_service.brand_for_type(db, "boat"),
@@ -57,6 +59,11 @@ def update_business(payload: dict, db: Session = Depends(get_db)):
                              str(payload["business_name"]).strip())
     if "business_oib" in payload:
         settings_service.set(db, "business_oib", str(payload["business_oib"]).strip())
+    if "meeting_arranged" in payload:
+        settings_service.set(db, "meeting_arranged",
+                             "1" if payload["meeting_arranged"] else "0")
+    if "meeting_note" in payload:
+        settings_service.set(db, "meeting_note", str(payload["meeting_note"]).strip())
     if "default_deposit_percent" in payload:
         settings_service.set(db, settings_service.DEFAULT_DEPOSIT_KEY,
                              str(payload["default_deposit_percent"]))

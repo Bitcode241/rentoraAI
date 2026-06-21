@@ -31,6 +31,11 @@ def public_config(asset_type: str = "jetski", db: Session = Depends(get_db)):
         "lead_time_hours": settings_service.lead_time_hours(db, asset_type),
         "open_hour": int(settings_service.get(db, "open_hour", "8") or 8),
         "close_hour": int(settings_service.get(db, "close_hour", "20") or 20),
+        # When ON, the widget shows "meeting point arranged after booking" instead
+        # of any public location — used for spots that can't be advertised online.
+        "meeting_arranged": (settings_service.get(db, "meeting_arranged", "0") or "0") == "1",
+        "meeting_note": settings_service.get(db, "meeting_note", "") or "",
+        "currency": "EUR",
         "currency": "EUR",
     }
 
@@ -265,8 +270,12 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
             if transfer_label:
                 notes.append(transfer_label)
             b.transfer_note = " | ".join(notes)
+        if i == 0:
             if transfer_pickup:
                 b.pickup_location = transfer_pickup
+            elif (settings_service.get(db, "meeting_arranged", "0") or "0") == "1":
+                # spot can't be advertised; flag it so the owner knows to call
+                b.pickup_location = "Dogovor s gostom"
             db.commit()
         bookings.append(b)
     if not bookings:
