@@ -85,9 +85,7 @@ def update_tour(tour_id: int, payload: dict, db: Session = Depends(get_db),
     db.refresh(t)
     # if the name changed, remove the old per-unit packages first
     if old_name != t.name:
-        stale = TourType(asset_type=t.asset_type, name=old_name,
-                         duration_minutes=t.duration_minutes)
-        tour_service.remove_tour_from_units(db, stale)
+        tour_service.remove_tour_from_units(db, t.asset_type, old_name)
     tour_service.sync_tour_to_units(db, t)
     return _out(t)
 
@@ -98,7 +96,7 @@ def delete_tour(tour_id: int, db: Session = Depends(get_db),
     t = db.get(TourType, tour_id)
     if not t:
         raise HTTPException(404, "Tura nije pronađena.")
-    tour_service.remove_tour_from_units(db, t)
+    tour_service.remove_tour_from_units(db, t.asset_type, t.name)
     db.delete(t)
     db.commit()
     return {"ok": True}

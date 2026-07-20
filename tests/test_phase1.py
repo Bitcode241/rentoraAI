@@ -1700,7 +1700,7 @@ def test_create_tour_appears_on_all_units():
             RentalPackage.name == "Sunset Special").first()
         assert pkg is not None and pkg.price == 180
     # clean up so we don't pollute other tests that count packages
-    ts.remove_tour_from_units(db, t)
+    ts.remove_tour_from_units(db, t.asset_type, t.name)
     db.delete(t); db.commit()
     db.close()
 
@@ -1725,4 +1725,27 @@ def test_single_tour_embed_filter():
     one = pb.public_assets("jetski", tour=safari.id, db=db)
     assert len(one[0]["packages"]) == 1
     assert one[0]["packages"][0]["name"] == "Safari 90min (guided)"
+    db.close()
+
+
+def test_rename_tour_no_error_and_propagates():
+    """Renaming a tour must not error and must swap old->new packages on all units."""
+    from app.core.database import SessionLocal
+    from app.models.tour_type import TourType
+    from app.models.asset import Asset
+    from app.models.package import RentalPackage
+    from app.api.routes.tours import update_tour
+    db = SessionLocal()
+    t = db.query(TourType).filter(
+        TourType.name == "Safari 90min (guided)",
+        TourType.asset_type == "jetski").first()
+    r = update_tour(t.id, {"name": "Adriatic Rush",
+                           "duration_minutes": t.duration_minutes,
+                           "price": t.price}, db=db, _=None)
+    assert r["name"] == "Adriatic Rush"
+    jets = db.query(Asset).filter(Asset.asset_type == "jetski").count()
+    assert db.query(RentalPackage).filter(
+        RentalPackage.name == "Safari 90min (guided)").count() == 0
+    assert db.query(RentalPackage).filter(
+        RentalPackage.name == "Adriatic Rush").count() == jets
     db.close()

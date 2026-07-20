@@ -59,14 +59,16 @@ def sync_tour_to_units(db: Session, tour: TourType):
     db.commit()
 
 
-def remove_tour_from_units(db: Session, tour: TourType):
-    """Delete the matching per-unit packages when a catalog tour is deleted."""
-    units = db.query(Asset).filter(Asset.asset_type == tour.asset_type).all()
+def remove_tour_from_units(db: Session, asset_type: str, name: str):
+    """Delete the matching per-unit packages by asset_type + tour name.
+    Takes plain values (not an ORM object) to avoid autoflushing a throwaway
+    TourType into the session."""
+    units = db.query(Asset).filter(Asset.asset_type == asset_type).all()
     unit_ids = [u.id for u in units]
     if unit_ids:
         (db.query(RentalPackage)
          .filter(RentalPackage.asset_id.in_(unit_ids),
-                 RentalPackage.name == tour.name)
+                 RentalPackage.name == name)
          .delete(synchronize_session=False))
         db.commit()
 
