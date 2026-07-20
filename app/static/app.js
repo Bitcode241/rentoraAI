@@ -157,6 +157,7 @@ const RENDER = {
               <td>${r.bookings}×</td>
               <td>${money(r.revenue)}</td>
               <td style="text-align:right;padding-right:14px;white-space:nowrap">
+                <button class="btn btn-sm btn-ghost" onclick="tourEmbed(${t.id},'${t.name.replace(/'/g,"")}','${t.asset_type}')">iframe</button>
                 <button class="btn btn-sm btn-ghost" onclick='tourModal(${JSON.stringify(t)})'>Uredi</button>
                 <button class="btn btn-sm btn-ghost" onclick="delTour(${t.id},'${t.name.replace(/'/g,"")}')">Obriši</button>
               </td></tr>`;
@@ -425,6 +426,26 @@ async function delTour(id,name){
   if(!confirm('Obrisati turu "'+name+'"? Uklonit će se s ponude na svim jetovima.')) return;
   try{ await api('/api/tours/'+id,{method:'DELETE'}); go('Tours'); }
   catch(e){ alert(e.message||'Greška'); }
+}
+function tourEmbed(id, name, atype){
+  const base = location.origin;
+  const url = `${base}/book/${atype}?tour=${id}`;
+  const iframe = `<iframe src="${url}" style="width:100%;height:900px;border:0" title="${name}"></iframe>`;
+  openModal(`
+    <h3 style="margin-top:0">Ugradnja — ${name}</h3>
+    <p style="color:var(--mut);font-size:13px">Ovaj kod prikazuje <b>samo ovu turu</b>. Zalijepi ga na stranicu te ture na svom sajtu — gost vidi isključivo "${name}".</p>
+    <label style="font-size:12px;color:var(--mut)">Direktni link (za dugme ili menu)</label>
+    <div style="display:flex;gap:6px;margin:4px 0 14px">
+      <input readonly value="${url}" id="te_link" style="flex:1;font-size:13px;background:var(--bg)">
+      <button class="btn btn-sm" onclick="copyVal('te_link')">Kopiraj</button>
+    </div>
+    <label style="font-size:12px;color:var(--mut)">iframe kod (zalijepi u HTML stranice)</label>
+    <div style="display:flex;gap:6px;margin:4px 0 0">
+      <textarea readonly id="te_emb" style="flex:1;font-size:12px;background:var(--bg);height:70px;resize:none">${iframe.replace(/</g,'&lt;')}</textarea>
+      <button class="btn btn-sm" onclick="copyVal('te_emb')">Kopiraj</button>
+    </div>
+    <div style="font-size:11px;color:var(--mut);margin-top:8px">Jezik: dodaj <code>&amp;lang=en</code> ili <code>&amp;lang=de</code> na link za fiksni jezik.</div>
+    <div style="margin-top:16px"><button class="btn btn-ghost" onclick="closeModal()">Zatvori</button></div>`);
 }
 
 

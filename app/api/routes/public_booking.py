@@ -41,10 +41,21 @@ def public_config(asset_type: str = "jetski", db: Session = Depends(get_db)):
 
 
 @router.get("/assets")
-def public_assets(asset_type: str = "jetski", db: Session = Depends(get_db)):
+def public_assets(asset_type: str = "jetski", tour: int = 0,
+                  db: Session = Depends(get_db)):
     """One card PER MODEL GROUP (not per physical unit), with how many units exist.
     Guests pick a model + quantity; the system assigns free units behind the scenes.
-    Partner boats aren't sold directly through the public widget."""
+    Partner boats aren't sold directly through the public widget.
+
+    If `tour` (a catalog tour id) is given, only that tour's package is offered —
+    used for single-tour embeds (one iframe per tour)."""
+    # resolve the catalog tour to a (name, duration) filter
+    tour_filter = None
+    if tour:
+        from app.models.tour_type import TourType
+        tt = db.get(TourType, tour)
+        if tt:
+            tour_filter = (tt.name, tt.duration_minutes)
     rows = (db.query(Asset)
             .filter(Asset.asset_type == asset_type, Asset.active.is_(True),
                     Asset.out_of_service.is_(False),
@@ -53,6 +64,12 @@ def public_assets(asset_type: str = "jetski", db: Session = Depends(get_db)):
     groups = {}
     for a in rows:
         grp = (a.model_group or "").strip().lower() or f"id-{a.id}"
+        pkgs = pricing.list_packages(a)
+        if tour_filter:
+            pkgs = [p for p in pkgs if p["name"] == tour_filter[0]
+                    and p["duration_minutes"] == tour_filter[1]]
+            if not pkgs:
+                continue  # this unit doesn't offer the requested tour
         if grp not in groups:
             # display name without the "(1)" suffix
             import re as _re
@@ -64,7 +81,7 @@ def public_assets(asset_type: str = "jetski", db: Session = Depends(get_db)):
                            "packages": [{"id": p["package_id"], "name": p["name"],
                                          "duration_minutes": p["duration_minutes"],
                                          "price": p["price"], "deposit": p["deposit_amount"]}
-                                        for p in pricing.list_packages(a)]}
+                                        for p in pkgs]}
         groups[grp]["fleet_size"] += 1
     return list(groups.values())
 

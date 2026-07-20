@@ -1703,3 +1703,26 @@ def test_create_tour_appears_on_all_units():
     ts.remove_tour_from_units(db, t)
     db.delete(t); db.commit()
     db.close()
+
+
+def test_single_tour_embed_filter():
+    """?tour=ID limits the widget to just that one tour's package."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.tour_type import TourType
+    from app.api.routes import public_booking as pb
+    db = SessionLocal()
+    for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
+        j.model_group = "yamaha-vx"
+    db.commit()
+    # all tours
+    all_cards = pb.public_assets("jetski", db=db)
+    assert len(all_cards[0]["packages"]) >= 5
+    # filter to one catalog tour
+    safari = db.query(TourType).filter(
+        TourType.name == "Safari 90min (guided)",
+        TourType.asset_type == "jetski").first()
+    one = pb.public_assets("jetski", tour=safari.id, db=db)
+    assert len(one[0]["packages"]) == 1
+    assert one[0]["packages"][0]["name"] == "Safari 90min (guided)"
+    db.close()

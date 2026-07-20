@@ -186,6 +186,8 @@
 
 <script>
 const TYPE = location.pathname.split('/').pop() || 'jetski';
+// Optional single-tour embed: ?tour=ID shows only that tour.
+const TOUR_ID = new URLSearchParams(location.search).get('tour') || '';
 const API = '/api/public';
 // Language: ?lang=en in the URL wins, else the browser language, else Croatian.
 const LANG = (()=>{
@@ -262,7 +264,7 @@ async function init(){
   try{
     [CFG, ASSETS, ADDONS] = await Promise.all([
       fetch(`${API}/config?asset_type=${TYPE}`).then(r=>r.json()),
-      fetch(`${API}/assets?asset_type=${TYPE}`).then(r=>r.json()),
+      fetch(`${API}/assets?asset_type=${TYPE}${TOUR_ID?'&tour='+encodeURIComponent(TOUR_ID):''}`).then(r=>r.json()),
       fetch(`${API}/addons?asset_type=${TYPE}`).then(r=>r.json()),
     ]);
     applyTheme();
