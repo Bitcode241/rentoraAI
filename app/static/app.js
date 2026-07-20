@@ -1,12 +1,13 @@
 const API = '';
 let TOKEN = '';
 let DASH = null;
-const PAGES = ['Dashboard','Calendar','Assets','Transfers','Add-ons','Widget','Bookings','Customers','Email Inbox','Mail Settings',
+const PAGES = ['Dashboard','Calendar','Assets','Tours','Transfers','Add-ons','Widget','Bookings','Customers','Email Inbox','Mail Settings',
   'Settings',
   'Revenue Overview','Upcoming Reservations',
   "Today's Reservations",'Recent Conversations'];
 const SUBS = {
   'Dashboard':'Live operational overview',
+  'Tours':'Katalog tura — jedna tura, jedan ID',
   'Assets':'Fleet — boats & jet skis',
   'Transfers':'Pickup / drop-off zones & prices',
   'Bookings':'All reservations across channels',
@@ -129,6 +130,40 @@ const RENDER = {
       <td class="row-actions"><button class="btn btn-sm btn-ghost" onclick="radiusModal(${r.id})">Uredi</button>
       <button class="btn btn-sm btn-ghost" onclick="delRadius(${r.id})">Obriši</button></td></tr>`).join('')
       ||'<tr><td colspan=6 class="empty">Nema GPS zona — dodaj prvu</td></tr>'}</tbody></table></div>`;
+  },
+  'Tours': async (v)=>{
+    const [tours, report] = await Promise.all([
+      api('/api/tours?asset_type=jetski'),
+      api('/api/tours/report?asset_type=jetski')]);
+    const repMap = {}; report.forEach(r=>repMap[r.tour_id]=r);
+    v.innerHTML = `
+      <div class="toolbar" style="margin-bottom:14px">
+        <button class="btn btn-sm" onclick="tourModal()">+ Nova tura</button>
+        <span style="color:var(--mut);font-size:12px">Svaka tura ima svoj ID i vrijedi za sve jetove. Promjena cijene ovdje mijenja je svugdje.</span>
+      </div>
+      <div class="panel" style="padding:0;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse;font-size:14px">
+          <thead><tr style="text-align:left;background:var(--bg)">
+            <th style="padding:11px 14px">ID</th><th>Tura</th><th>Trajanje</th><th>Cijena</th>
+            <th>Prodano</th><th>Prihod</th><th></th></tr></thead>
+          <tbody>
+          ${tours.map(t=>{
+            const r=repMap[t.id]||{bookings:0,revenue:0};
+            return `<tr style="border-top:1px solid var(--line)">
+              <td style="padding:11px 14px;color:var(--mut)">#${t.id}</td>
+              <td><b>${t.name}</b>${t.guided?' <span class="badge-off" style="font-size:10px">GUIDED</span>':''}${!t.active?' <span style="color:var(--warn);font-size:11px">(neaktivna)</span>':''}</td>
+              <td>${t.duration_minutes} min</td>
+              <td><b>${money(t.price)}</b></td>
+              <td>${r.bookings}×</td>
+              <td>${money(r.revenue)}</td>
+              <td style="text-align:right;padding-right:14px;white-space:nowrap">
+                <button class="btn btn-sm btn-ghost" onclick='tourModal(${JSON.stringify(t)})'>Uredi</button>
+                <button class="btn btn-sm btn-ghost" onclick="delTour(${t.id},'${t.name.replace(/'/g,"")}')">Obriši</button>
+              </td></tr>`;
+          }).join('')}
+          </tbody>
+        </table>
+      </div>`;
   },
   'Add-ons': async (v)=>{
     const a = await api('/api/addons');
@@ -351,6 +386,47 @@ function bookingTable(b, full){
 function openModal(html){ document.getElementById('modal').innerHTML=html;
   document.getElementById('modalbg').style.display='flex'; }
 function closeModal(){ document.getElementById('modalbg').style.display='none'; }
+
+function tourModal(t){
+  t = t || {asset_type:'jetski', name:'', duration_minutes:60, price:0, guided:false, active:true, description:''};
+  const id = t.id || 0;
+  openModal(`
+    <h3 style="margin-top:0">${id?'Uredi turu #'+id:'Nova tura'}</h3>
+    <label>Naziv ture</label><input id="t_name" value="${(t.name||'').replace(/"/g,'&quot;')}" placeholder="npr. Safari 90min">
+    <label>Trajanje (minute)</label><input id="t_dur" type="number" min="1" value="${t.duration_minutes||60}">
+    <label>Cijena (€)</label><input id="t_price" type="number" step="0.01" value="${t.price||0}">
+    <label>Depozit % (0 = koristi zadani)</label><input id="t_dep" type="number" min="0" max="100" value="${t.deposit_percent||0}">
+    <label style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer">
+      <input id="t_guided" type="checkbox" style="width:auto" ${t.guided?'checked':''}> Vođena tura (safari s instruktorom)</label>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:6px;cursor:pointer">
+      <input id="t_active" type="checkbox" style="width:auto" ${t.active!==false?'checked':''}> Aktivna (vidljiva u widgetu)</label>
+    <label>Opis (nije obavezno)</label><input id="t_desc" value="${(t.description||'').replace(/"/g,'&quot;')}">
+    <p style="font-size:12px;color:var(--mut);margin-top:8px">Promjena cijene/trajanja automatski se primjenjuje na sve jetove.</p>
+    <div style="margin-top:14px;display:flex;gap:8px">
+      <button class="btn" onclick="saveTour(${id})">Spremi</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Odustani</button>
+    </div>`);
+}
+async function saveTour(id){
+  const body = {
+    asset_type:'jetski',
+    name:val('t_name'), duration_minutes:+val('t_dur')||0,
+    price:+val('t_price')||0, deposit_percent:+val('t_dep')||0,
+    guided:document.getElementById('t_guided').checked,
+    active:document.getElementById('t_active').checked,
+    description:val('t_desc')};
+  try{
+    if(id) await api('/api/tours/'+id,{method:'PUT',body:JSON.stringify(body)});
+    else await api('/api/tours',{method:'POST',body:JSON.stringify(body)});
+    closeModal(); go('Tours');
+  }catch(e){ alert(e.message||'Greška pri spremanju'); }
+}
+async function delTour(id,name){
+  if(!confirm('Obrisati turu "'+name+'"? Uklonit će se s ponude na svim jetovima.')) return;
+  try{ await api('/api/tours/'+id,{method:'DELETE'}); go('Tours'); }
+  catch(e){ alert(e.message||'Greška'); }
+}
+
 
 async function assetModal(id){
   let a = {asset_type:'boat',capacity:1,fuel_policy:'full-to-full',active:true,deposit_percent:30};

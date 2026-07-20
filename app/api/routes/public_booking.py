@@ -260,6 +260,11 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
             db, asset_id=unit.id, customer_id=cust.id,
             package_id=upkg["package_id"],
             start=st, end=end, source="widget", passengers=passengers)
+        # link to the canonical tour for reporting (one id per tour)
+        from app.services import tour_service
+        b.tour_type_id = tour_service.match_tour_id(
+            db, anchor.asset_type, pkg["name"], pkg["duration_minutes"])
+        db.commit()
         if i == 0 and (addons_total or extra_person_total or transfer_total):
             b.total_price = (b.total_price or 0) + addons_total + extra_person_total + transfer_total
             notes = []

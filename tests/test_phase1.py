@@ -1,4 +1,11 @@
 """Tests for Phase 1: email facade, scheduler config, escalation/needs-human."""
+from datetime import datetime, timedelta, timezone
+
+
+def _future_date(days=7, hour=9):
+    """A start datetime safely in the future so past-date guards don't reject it."""
+    d = datetime.now(timezone.utc) + timedelta(days=days)
+    return d.strftime(f"%Y-%m-%dT{hour:02d}:00:00")
 
 
 def test_email_status(client, auth):
@@ -1047,7 +1054,7 @@ def test_widget_booking_stores_language():
     anchor = db.query(Asset).filter(Asset.asset_type == "jetski").first()
     pkg = pb.public_assets("jetski", db=db)[0]["packages"][0]
     pb.public_book({"asset_id": anchor.id, "package_id": pkg["id"],
-                    "start": "2026-07-02T09:00:00", "qty": 1, "passengers": 1,
+                    "start": _future_date(5), "qty": 1, "passengers": 1,
                     "name": "T", "email": "lang@x.com", "phone": "+385",
                     "lang": "en"}, request=None, db=db)
     c = db.query(Customer).filter(Customer.email == "lang@x.com").first()
@@ -1069,7 +1076,7 @@ def test_widget_name_overrides_stale():
     anchor = db.query(Asset).filter(Asset.asset_type == "jetski").first()
     pkg = pb.public_assets("jetski", db=db)[0]["packages"][0]
     pb.public_book({"asset_id": anchor.id, "package_id": pkg["id"],
-                    "start": "2026-07-06T09:00:00", "qty": 1, "passengers": 1,
+                    "start": _future_date(6), "qty": 1, "passengers": 1,
                     "name": "Real Name", "email": "ov@x.com", "phone": "+385",
                     "lang": "hr"}, request=None, db=db)
     c = db.query(Customer).filter(Customer.email == "ov@x.com").first()
@@ -1091,7 +1098,7 @@ def test_jetski_extra_person_fee():
     pkg = pb.public_assets("jetski", db=db)[0]["packages"][1]  # 1h 140
     # 2 jets, 4 people -> +40
     pb.public_book({"asset_id": anchor.id, "package_id": pkg["id"],
-                    "start": "2026-08-15T09:00:00", "qty": 2, "passengers": 4,
+                    "start": _future_date(26), "qty": 2, "passengers": 4,
                     "name": "X", "email": "ef@x.com", "phone": "1"},
                    request=None, db=db)
     bs = db.query(Booking).order_by(Booking.id.desc()).limit(2).all()
@@ -1115,7 +1122,7 @@ def test_extra_person_scales_with_fleet():
     anchor = db.query(Asset).filter(Asset.asset_type == "jetski").first()
     pkg = pb.public_assets("jetski", db=db)[0]["packages"][1]  # 1h
     pb.public_book({"asset_id": anchor.id, "package_id": pkg["id"],
-                    "start": "2026-09-09T09:00:00", "qty": 5, "passengers": 10,
+                    "start": _future_date(51), "qty": 5, "passengers": 10,
                     "name": "G", "email": "fleet@x.com", "phone": "1"},
                    request=None, db=db)
     bs = db.query(Booking).order_by(Booking.id.desc()).limit(5).all()
@@ -1614,4 +1621,85 @@ def test_meeting_arranged_flow(monkeypatch):
                        request=None, db=db)
     b = db.get(Booking, r["booking_id"])
     assert b.pickup_location == "Dogovor s gostom"
+    db.close()
+
+
+def test_tour_catalog_one_id_per_tour():
+    """The catalog gives each tour a single id that applies across all units,
+    and editing a tour's price propagates to every unit's package."""
+    from app.core.database import SessionLocal
+    from app.services import tour_service as ts
+    from app.models.tour_type import TourType
+    from app.models.package import RentalPackage
+    from app.models.asset import Asset
+    db = SessionLocal()
+    ts.seed_catalog_from_packages(db)  # idempotent; may already be seeded
+    tours = ts.list_tours(db, "jetski")
+    assert len(tours) >= 5  # jetski tours present
+    names = {t.name for t in tours}
+    assert "Safari 90min (guided)" in names
+    # one id per tour
+    safari = next(t for t in tours if t.name == "Safari 90min (guided)")
+    # change price in catalog -> propagate to all jets
+    safari.price = 299.0
+    db.commit()
+    ts.sync_tour_to_units(db, safari)
+    jets = db.query(Asset).filter(Asset.asset_type == "jetski").all()
+    prices = [db.query(RentalPackage).filter(
+        RentalPackage.asset_id == j.id,
+        RentalPackage.name == "Safari 90min (guided)").first().price for j in jets]
+    assert all(p == 299.0 for p in prices)
+    db.close()
+
+
+def test_tour_report_by_id():
+    from app.core.database import SessionLocal
+    from app.services import tour_service as ts
+    from app.models.tour_type import TourType
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.models.booking import Booking
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    ts.seed_catalog_from_packages(db)
+    tour = db.query(TourType).filter(TourType.name == "1h",
+                                     TourType.asset_type == "jetski").first()
+    jet = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    c = Customer(full_name="R", email="rep@x.com")
+    db.add(c); db.commit(); db.refresh(c)
+    now = datetime.now(timezone.utc)
+    for i in range(2):
+        db.add(Booking(asset_id=jet.id, customer_id=c.id,
+                       start_datetime=now + timedelta(days=i + 1),
+                       end_datetime=now + timedelta(days=i + 1, hours=1),
+                       total_price=140, amount_paid=42, payment_status="deposit_paid",
+                       passengers=1, package_name="1h", tour_type_id=tour.id))
+    db.commit()
+    rep = ts.tour_report(db, "jetski")
+    row = next(r for r in rep if r["tour_id"] == tour.id)
+    assert row["bookings"] == 2
+    assert row["revenue"] == 280.0
+    db.close()
+
+
+def test_create_tour_appears_on_all_units():
+    from app.core.database import SessionLocal
+    from app.models.tour_type import TourType
+    from app.models.asset import Asset
+    from app.models.package import RentalPackage
+    from app.services import tour_service as ts
+    db = SessionLocal()
+    t = TourType(asset_type="jetski", name="Sunset Special", duration_minutes=75,
+                 price=180, guided=True, sort_order=75)
+    db.add(t); db.commit(); db.refresh(t)
+    ts.sync_tour_to_units(db, t)
+    jets = db.query(Asset).filter(Asset.asset_type == "jetski").all()
+    for j in jets:
+        pkg = db.query(RentalPackage).filter(
+            RentalPackage.asset_id == j.id,
+            RentalPackage.name == "Sunset Special").first()
+        assert pkg is not None and pkg.price == 180
+    # clean up so we don't pollute other tests that count packages
+    ts.remove_tour_from_units(db, t)
+    db.delete(t); db.commit()
     db.close()

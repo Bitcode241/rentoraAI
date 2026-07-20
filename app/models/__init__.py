@@ -19,3 +19,4 @@ __all__ = [
 ]
 from app.models.addon import AddOn
 from app.models.transfer import TransferRadius
+from app.models.tour_type import TourType

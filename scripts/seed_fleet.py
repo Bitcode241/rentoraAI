@@ -101,7 +101,14 @@ def seed_fleet(reset: bool = False):
         pkgs = db.query(RentalPackage).count()
         zones = db.query(TransferZone).count()
         log.info("fleet_seeded", boats=boats, jetski=jetski, packages=pkgs, zones=zones)
-        print(f"Seeded {boats} boats + {jetski} jet skis, {pkgs} packages, {zones} transfer zones.")
+        # build the tour catalog (one id per tour) from the seeded packages
+        try:
+            from app.services import tour_service
+            tours = tour_service.seed_catalog_from_packages(db)
+        except Exception:
+            tours = 0
+        print(f"Seeded {boats} boats + {jetski} jet skis, {pkgs} packages, "
+              f"{zones} transfer zones, {tours} tours.")
     finally:
         db.close()
 

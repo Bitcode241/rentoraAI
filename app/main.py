@@ -14,7 +14,7 @@ from app.core.database import Base, engine, SessionLocal
 from app.api.routes import (auth, assets, customers, bookings, availability,
                             messages, emails, reports, webhooks, dashboard, packages,
                             transfers, calendar, mailboxes, payments, settings as settings_routes,
-                            addons, public_booking)
+                            addons, public_booking, tours)
 
 configure_logging(settings.debug)
 log = get_logger("main")
@@ -51,7 +51,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 for r in (auth, assets, customers, bookings, availability, messages,
-          emails, reports, webhooks, dashboard, packages, transfers, calendar, mailboxes, payments, settings_routes, addons, public_booking):
+          emails, reports, webhooks, dashboard, packages, transfers, calendar, mailboxes, payments, settings_routes, addons, public_booking, tours):
     app.include_router(r.router)
 app.include_router(public_booking.widget_router)
 

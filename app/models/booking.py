@@ -15,6 +15,8 @@ class Booking(Base):
     deposit_amount: Mapped[float] = mapped_column(Float, default=0.0)
     package_id: Mapped[int] = mapped_column(ForeignKey("rental_packages.id"), nullable=True)
     package_name: Mapped[str] = mapped_column(String(64), default="")
+    # canonical tour catalog id (one id per tour, across all units) — for reports
+    tour_type_id: Mapped[int] = mapped_column(Integer, nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     source: Mapped[str] = mapped_column(String(16), default="admin")
     notes: Mapped[str] = mapped_column(Text, default="")
