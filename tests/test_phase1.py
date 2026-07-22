@@ -1772,3 +1772,38 @@ def test_prune_orphan_packages():
     assert "Ghost Tour" not in after
     assert "1h" in after  # a real catalog tour survives pruning
     db.close()
+
+
+def test_rebuild_units_from_catalog():
+    """Rebuild makes every unit's packages exactly match the active catalog."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.package import RentalPackage
+    from app.models.tour_type import TourType
+    from app.services import tour_service as ts
+    db = SessionLocal()
+    # replace catalog with a known set
+    db.query(TourType).filter(TourType.asset_type == "jetski").delete()
+    for n, d, p in [("Adriatic Rush", 30, 89), ("Grand Safari", 180, 440)]:
+        db.add(TourType(asset_type="jetski", name=n, duration_minutes=d,
+                        price=p, sort_order=d))
+    db.commit()
+    res = ts.rebuild_units_from_catalog(db, "jetski")
+    assert res["tours"] == 2
+    jets = db.query(Asset).filter(Asset.asset_type == "jetski").all()
+    for j in jets:
+        names = sorted(p.name for p in db.query(RentalPackage).filter(
+            RentalPackage.asset_id == j.id).all())
+        assert names == ["Adriatic Rush", "Grand Safari"]  # exactly the catalog
+    # restore the standard catalog + units so other tests aren't affected
+    db.query(TourType).filter(TourType.asset_type == "jetski").delete()
+    db.commit()
+    for n, d, p, g in [("30 min", 30, 90, False), ("1h", 60, 140, False),
+                       ("2h", 120, 250, False),
+                       ("Safari 90min (guided)", 90, 250, True),
+                       ("Safari 120min (guided)", 120, 350, True)]:
+        db.add(TourType(asset_type="jetski", name=n, duration_minutes=d,
+                        price=p, guided=g, sort_order=d))
+    db.commit()
+    ts.rebuild_units_from_catalog(db, "jetski")
+    db.close()

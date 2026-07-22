@@ -29,6 +29,15 @@ def list_tours(asset_type: str = "", db: Session = Depends(get_db),
     return [_out(t) for t in tour_service.list_tours(db, asset_type)]
 
 
+@router.post("/rebuild")
+def rebuild_from_catalog(asset_type: str = "jetski", db: Session = Depends(get_db),
+                         _=Depends(get_current_user)):
+    """Make every unit's packages exactly match the active catalog tours.
+    The reliable fix when renames left units out of sync."""
+    result = tour_service.rebuild_units_from_catalog(db, asset_type)
+    return {"ok": True, **result}
+
+
 @router.post("/prune-orphans")
 def prune_orphans(asset_type: str = "", db: Session = Depends(get_db),
                   _=Depends(get_current_user)):

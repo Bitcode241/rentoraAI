@@ -34,6 +34,35 @@ def match_tour_id(db: Session, asset_type: str, name: str, duration: int):
     return t.id if t else None
 
 
+def rebuild_units_from_catalog(db: Session, asset_type: str):
+    """Make every unit's packages EXACTLY match the active catalog tours for this
+    asset type: drop all current packages, then add one per catalog tour. This is
+    the reliable fix after renames leave the units out of sync. Bookings keep their
+    package_name string, so history is unaffected."""
+    tours = (db.query(TourType)
+             .filter(TourType.asset_type == asset_type,
+                     TourType.active == True)  # noqa: E712
+             .all())
+    units = db.query(Asset).filter(Asset.asset_type == asset_type).all()
+    unit_ids = [u.id for u in units]
+    if unit_ids:
+        (db.query(RentalPackage)
+         .filter(RentalPackage.asset_id.in_(unit_ids))
+         .delete(synchronize_session=False))
+        db.commit()
+    added = 0
+    for u in units:
+        for t in tours:
+            db.add(RentalPackage(
+                asset_id=u.id, name=t.name, duration_minutes=t.duration_minutes,
+                price=t.price, guided=t.guided, description=t.description or ""))
+            added += 1
+    db.commit()
+    log.info("units_rebuilt_from_catalog", asset_type=asset_type,
+             units=len(units), tours=len(tours), packages_added=added)
+    return {"units": len(units), "tours": len(tours), "packages": added}
+
+
 def prune_orphan_packages(db: Session, asset_type: str = ""):
     """Remove per-unit packages whose name no longer matches ANY catalog tour of
     that asset type. These are leftovers from renamed/deleted tours. Returns count.

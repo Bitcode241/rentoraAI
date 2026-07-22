@@ -139,7 +139,7 @@ const RENDER = {
     v.innerHTML = `
       <div class="toolbar" style="margin-bottom:14px">
         <button class="btn btn-sm" onclick="tourModal()">+ Nova tura</button>
-        <button class="btn btn-sm btn-ghost" onclick="pruneTours()">Očisti zaostale pakete</button>
+        <button class="btn btn-sm btn-ghost" onclick="rebuildTours()">Uskladi jetove s katalogom</button>
         <span style="color:var(--mut);font-size:12px">Svaka tura ima svoj ID i vrijedi za sve jetove. Promjena cijene ovdje mijenja je svugdje.</span>
       </div>
       <div class="panel" style="padding:0;overflow:hidden">
@@ -433,6 +433,14 @@ async function pruneTours(){
   try{
     const r=await api('/api/tours/prune-orphans?asset_type=jetski',{method:'POST'});
     alert('Očišćeno zaostalih paketa: '+(r.removed||0));
+    go('Tours');
+  }catch(e){ alert(e.message||'Greška'); }
+}
+async function rebuildTours(){
+  if(!confirm('Uskladiti jetove s katalogom? Svi jetovi dobit će TOČNO ture iz kataloga (stare/zaostale se uklanjaju). Povijest rezervacija ostaje.')) return;
+  try{
+    const r=await api('/api/tours/rebuild?asset_type=jetski',{method:'POST'});
+    alert('Usklađeno! '+(r.units||0)+' jetova × '+(r.tours||0)+' tura.');
     go('Tours');
   }catch(e){ alert(e.message||'Greška'); }
 }
