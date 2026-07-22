@@ -139,6 +139,7 @@ const RENDER = {
     v.innerHTML = `
       <div class="toolbar" style="margin-bottom:14px">
         <button class="btn btn-sm" onclick="tourModal()">+ Nova tura</button>
+        <button class="btn btn-sm btn-ghost" onclick="pruneTours()">Očisti zaostale pakete</button>
         <span style="color:var(--mut);font-size:12px">Svaka tura ima svoj ID i vrijedi za sve jetove. Promjena cijene ovdje mijenja je svugdje.</span>
       </div>
       <div class="panel" style="padding:0;overflow:hidden">
@@ -426,6 +427,14 @@ async function delTour(id,name){
   if(!confirm('Obrisati turu "'+name+'"? Uklonit će se s ponude na svim jetovima.')) return;
   try{ await api('/api/tours/'+id,{method:'DELETE'}); go('Tours'); }
   catch(e){ alert(e.message||'Greška'); }
+}
+async function pruneTours(){
+  if(!confirm('Očistiti zaostale pakete od preimenovanih/obrisanih tura? Prave ture ostaju.')) return;
+  try{
+    const r=await api('/api/tours/prune-orphans?asset_type=jetski',{method:'POST'});
+    alert('Očišćeno zaostalih paketa: '+(r.removed||0));
+    go('Tours');
+  }catch(e){ alert(e.message||'Greška'); }
 }
 function tourEmbed(id, name, atype){
   const base = location.origin;

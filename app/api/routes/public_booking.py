@@ -66,9 +66,14 @@ def public_assets(asset_type: str = "jetski", tour: int = 0,
         grp = (a.model_group or "").strip().lower() or f"id-{a.id}"
         pkgs = pricing.list_packages(a)
         if tour_filter:
-            pkgs = [p for p in pkgs if p["name"] == tour_filter[0]
-                    and p["duration_minutes"] == tour_filter[1]]
-            if not pkgs:
+            filtered = [p for p in pkgs if p["name"] == tour_filter[0]
+                        and p["duration_minutes"] == tour_filter[1]]
+            # only apply the filter if this unit actually offers the tour;
+            # if nothing matches we skip below, but we DON'T want an empty widget
+            # caused by a renamed/desynced tour — so track that we filtered.
+            if filtered:
+                pkgs = filtered
+            else:
                 continue  # this unit doesn't offer the requested tour
         if grp not in groups:
             # display name without the "(1)" suffix

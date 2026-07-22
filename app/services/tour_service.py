@@ -34,6 +34,34 @@ def match_tour_id(db: Session, asset_type: str, name: str, duration: int):
     return t.id if t else None
 
 
+def prune_orphan_packages(db: Session, asset_type: str = ""):
+    """Remove per-unit packages whose name no longer matches ANY catalog tour of
+    that asset type. These are leftovers from renamed/deleted tours. Returns count.
+    Bookings keep their package_name string, so history is unaffected."""
+    q = db.query(TourType)
+    if asset_type:
+        q = q.filter(TourType.asset_type == asset_type)
+    tours = q.all()
+    # valid (asset_type, name) pairs from the catalog
+    valid = {(t.asset_type, t.name) for t in tours}
+    asset_q = db.query(Asset)
+    if asset_type:
+        asset_q = asset_q.filter(Asset.asset_type == asset_type)
+    assets = {a.id: a.asset_type for a in asset_q.all()}
+    removed = 0
+    pkgs = db.query(RentalPackage).all()
+    for p in pkgs:
+        atype = assets.get(p.asset_id)
+        if atype is None:
+            continue  # asset of another type (when filtering) — leave it
+        if (atype, p.name) not in valid:
+            db.delete(p)
+            removed += 1
+    db.commit()
+    log.info("orphan_packages_pruned", removed=removed, asset_type=asset_type or "all")
+    return removed
+
+
 def sync_tour_to_units(db: Session, tour: TourType):
     """Push a catalog tour's price/duration onto every matching per-unit package,
     and create the package on units that don't have it yet. Keeps availability

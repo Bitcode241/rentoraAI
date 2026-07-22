@@ -29,6 +29,14 @@ def list_tours(asset_type: str = "", db: Session = Depends(get_db),
     return [_out(t) for t in tour_service.list_tours(db, asset_type)]
 
 
+@router.post("/prune-orphans")
+def prune_orphans(asset_type: str = "", db: Session = Depends(get_db),
+                  _=Depends(get_current_user)):
+    """Remove leftover per-unit packages from renamed/deleted tours."""
+    removed = tour_service.prune_orphan_packages(db, asset_type)
+    return {"ok": True, "removed": removed}
+
+
 @router.get("/report")
 def tours_report(asset_type: str = "", db: Session = Depends(get_db),
                  _=Depends(get_current_user)):

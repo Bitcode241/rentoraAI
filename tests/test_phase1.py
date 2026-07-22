@@ -1749,3 +1749,26 @@ def test_rename_tour_no_error_and_propagates():
     assert db.query(RentalPackage).filter(
         RentalPackage.name == "Adriatic Rush").count() == jets
     db.close()
+
+
+def test_prune_orphan_packages():
+    """Leftover packages from renamed/deleted tours are removed; real ones stay."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.package import RentalPackage
+    from app.services import tour_service as ts
+    db = SessionLocal()
+    for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
+        db.add(RentalPackage(asset_id=j.id, name="Ghost Tour",
+                             duration_minutes=45, price=99))
+    db.commit()
+    jet_id = db.query(Asset).filter(Asset.asset_type == "jetski").first().id
+    before = db.query(RentalPackage).filter(RentalPackage.asset_id == jet_id).count()
+    assert before == 6  # 5 real + 1 ghost
+    removed = ts.prune_orphan_packages(db, "jetski")
+    assert removed >= 6  # one ghost per jet
+    after = [p.name for p in db.query(RentalPackage).filter(
+        RentalPackage.asset_id == jet_id).all()]
+    assert "Ghost Tour" not in after
+    assert "1h" in after  # a real catalog tour survives pruning
+    db.close()
