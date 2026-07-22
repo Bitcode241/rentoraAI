@@ -189,15 +189,11 @@ const TYPE = location.pathname.split('/').pop() || 'jetski';
 // Optional single-tour embed: ?tour=ID shows only that tour.
 const TOUR_ID = new URLSearchParams(location.search).get('tour') || '';
 const API = '/api/public';
-// Language: ?lang= in the URL always wins. Otherwise default to English (most
-// guests are foreign tourists); only auto-switch to hr/de if the browser is
-// clearly set to that language.
+// Language: English is the default for everyone (guests are foreign tourists).
+// A guest who wants another language can pass ?lang=hr or ?lang=de explicitly.
 const LANG = (()=>{
   const q=(new URLSearchParams(location.search).get('lang')||'').slice(0,2).toLowerCase();
-  if(['hr','en','de'].includes(q)) return q;           // explicit choice wins
-  const b=(navigator.language||'').slice(0,2).toLowerCase();
-  if(b==='hr'||b==='de') return b;                     // native speaker -> their language
-  return 'en';                                         // everyone else -> English
+  return ['hr','en','de'].includes(q) ? q : 'en';
 })();
 const I18N={
   hr:{title:'Rezerviraj online',sub:'Odaberi, plati depozit, gotovo. Ostatak na licu mjesta.',
