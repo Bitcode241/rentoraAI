@@ -37,7 +37,19 @@ def set_meeting_points(db: Session, points: list):
             "name": name,
             "maps_url": (p.get("maps_url") or "").strip(),
             "note": (p.get("note") or "").strip(),
+            "primary": bool(p.get("primary")),
         })
+    # ensure at most one primary; if none marked, the first becomes primary
+    primaries = [p for p in clean if p["primary"]]
+    if not primaries and clean:
+        clean[0]["primary"] = True
+    elif len(primaries) > 1:
+        seen = False
+        for p in clean:
+            if p["primary"] and not seen:
+                seen = True
+            else:
+                p["primary"] = False
     settings_service.set(db, MEETING_POINTS_KEY, json.dumps(clean, ensure_ascii=False))
     return clean
 
@@ -64,38 +76,53 @@ def wa_link(number: str, text: str = "") -> str:
 
 # per-language labels for the meeting-point block
 _LABELS = {
-    "en": {"where": "WHERE TO MEET US", "pick": "Choose whichever location works best for you:",
-           "directions": "Directions", "questions": "Questions? Message us on WhatsApp:",
+    "en": {"main": "WHERE TO MEET US", "directions": "Directions",
+           "others_intro": "Prefer a different spot?",
+           "others": "We can also meet at these locations — just let us know in advance "
+                     "(most of our jet skis are based at our main point):",
+           "questions": "Questions or a different location? Message us on WhatsApp:",
            "wa": "Open WhatsApp chat"},
-    "hr": {"where": "GDJE NAS NAĐETE", "pick": "Odaberite lokaciju koja Vam najviše odgovara:",
-           "directions": "Upute", "questions": "Pitanja? Pišite nam na WhatsApp:",
+    "hr": {"main": "GDJE NAS NAĐETE", "directions": "Upute",
+           "others_intro": "Želite drugu lokaciju?",
+           "others": "Možemo se naći i na ovim lokacijama — samo nam javite unaprijed "
+                     "(većina skutera nam je na glavnoj lokaciji):",
+           "questions": "Pitanja ili druga lokacija? Pišite nam na WhatsApp:",
            "wa": "Otvori WhatsApp chat"},
-    "de": {"where": "TREFFPUNKTE", "pick": "Wählen Sie den passenden Treffpunkt:",
-           "directions": "Wegbeschreibung", "questions": "Fragen? Schreiben Sie uns auf WhatsApp:",
+    "de": {"main": "TREFFPUNKT", "directions": "Wegbeschreibung",
+           "others_intro": "Lieber ein anderer Ort?",
+           "others": "Wir können uns auch hier treffen — bitte vorab Bescheid geben "
+                     "(die meisten Jetskis sind an unserem Haupttreffpunkt):",
+           "questions": "Fragen oder anderer Treffpunkt? Schreiben Sie uns auf WhatsApp:",
            "wa": "WhatsApp-Chat öffnen"},
 }
 
 
 def meeting_block_text(db: Session, lang: str = "en") -> str:
-    """Plain-text meeting-point block appended to the confirmation email body.
-    Returns '' if the owner hasn't configured any points."""
+    """Confirmation-email block. The primary location is shown prominently with a
+    map pin (guests can just show up there); the rest are 'available on request via
+    WhatsApp' so the owner can prep the jet ski + staff for those spots."""
     points = get_meeting_points(db)
     wa = get_whatsapp_number(db)
     if not points and not wa:
         return ""
     lab = _LABELS.get(lang, _LABELS["en"])
+    primary = next((p for p in points if p.get("primary")), points[0] if points else None)
+    others = [p for p in points if p is not primary]
     lines = []
-    if points:
-        lines.append(f"— {lab['where']} —")
-        lines.append(lab["pick"])
+    if primary:
+        lines.append(f"— {lab['main']} —")
+        lines.append(f"{primary['name']}")
+        if primary.get("note"):
+            lines.append(primary["note"])
+        if primary.get("maps_url"):
+            lines.append(f"{lab['directions']}: {primary['maps_url']}")
         lines.append("")
-        for p in points:
+    if others:
+        lines.append(lab["others_intro"])
+        lines.append(lab["others"])
+        for p in others:
             lines.append(f"• {p['name']}")
-            if p.get("note"):
-                lines.append(f"  {p['note']}")
-            if p.get("maps_url"):
-                lines.append(f"  {lab['directions']}: {p['maps_url']}")
-            lines.append("")
+        lines.append("")
     if wa:
         link = wa_link(wa)
         lines.append(f"{lab['questions']} {wa}")

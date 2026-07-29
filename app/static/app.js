@@ -1096,10 +1096,14 @@ function renderMeetingPoints(){
       </div>
       <input value="${(p.maps_url||'').replace(/"/g,'&quot;')}" placeholder="Google Maps link (https://maps.google.com/...)" oninput="MP[${i}].maps_url=this.value" style="width:100%;margin-bottom:6px">
       <input value="${(p.note||'').replace(/"/g,'&quot;')}" placeholder="Kratke upute (npr. ponton ispred hotela)" oninput="MP[${i}].note=this.value" style="width:100%">
+      <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:13px;cursor:pointer">
+        <input type="radio" name="mp_primary" style="width:auto" ${p.primary?'checked':''} onchange="setPrimaryMP(${i})">
+        Glavna lokacija (uvijek dostupna, s pinom u mailu)</label>
     </div>`).join('');
 }
-function addMeetingPoint(){ MP.push({name:'',maps_url:'',note:''}); renderMeetingPoints(); }
-function delMeetingPoint(i){ MP.splice(i,1); renderMeetingPoints(); }
+function setPrimaryMP(i){ MP.forEach((p,idx)=>p.primary=(idx===i)); }
+function addMeetingPoint(){ MP.push({name:'',maps_url:'',note:'',primary:MP.length===0}); renderMeetingPoints(); }
+function delMeetingPoint(i){ const wasP=MP[i]&&MP[i].primary; MP.splice(i,1); if(wasP&&MP.length) MP[0].primary=true; renderMeetingPoints(); }
 function collectMeetingPoints(){ return MP.filter(p=>(p.name||'').trim()); }
 
 async function saveBusiness(){

@@ -1863,3 +1863,35 @@ def test_meeting_points_and_whatsapp_in_email():
     db.commit()
     assert meeting_service.meeting_block_text(db, "en") == ""
     db.close()
+
+
+def test_primary_location_prominent_others_on_request():
+    """The primary location is shown with a pin; others are 'on request'."""
+    from app.core.database import SessionLocal
+    from app.services import meeting_service
+    db = SessionLocal()
+    meeting_service.set_meeting_points(db, [
+        {"name": "Coral Beach", "maps_url": "", "note": "", "primary": False},
+        {"name": "Rixos", "maps_url": "https://maps.google.com/?q=Rixos",
+         "note": "Ponton", "primary": True},
+        {"name": "ACI Marina", "maps_url": "", "note": "", "primary": False},
+    ])
+    meeting_service.set_whatsapp_number(db, "+385919167163")
+    db.commit()
+    # primary persists even when not first
+    pts = meeting_service.get_meeting_points(db)
+    assert sum(1 for p in pts if p.get("primary")) == 1
+    assert next(p for p in pts if p["primary"])["name"] == "Rixos"
+    block = meeting_service.meeting_block_text(db, "en")
+    # primary shown with directions
+    assert "Rixos" in block and "Directions:" in block
+    # others listed under the 'on request' intro
+    assert "Prefer a different spot" in block
+    assert "Coral Beach" in block and "ACI Marina" in block
+    # if none marked primary, the first becomes primary automatically
+    meeting_service.set_meeting_points(db, [
+        {"name": "First"}, {"name": "Second"}])
+    db.commit()
+    pts2 = meeting_service.get_meeting_points(db)
+    assert pts2[0]["primary"] is True and pts2[1]["primary"] is False
+    db.close()
