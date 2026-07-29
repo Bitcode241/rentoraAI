@@ -21,12 +21,17 @@ def _parse(dt: str) -> datetime:
     s = (dt or "").strip()
     if not s:
         raise ValueError("empty datetime")
+    # ISO format (YYYY-MM-DD...) must be parsed strictly first — dayfirst/fuzzy
+    # would wrongly swap month and day (2026-08-02 -> 8 Feb). Only fall back to
+    # the forgiving parser for the AI's odd human formats.
     try:
-        out = dtparser.parse(s, dayfirst=True, fuzzy=True)
+        out = datetime.fromisoformat(s)
     except Exception:
-        # last resort: strip obvious noise and retry
-        cleaned = s.replace("pm", "").replace("am", "").replace("PM", "").replace("AM", "")
-        out = dtparser.parse(cleaned, dayfirst=True, fuzzy=True)
+        try:
+            out = dtparser.parse(s, dayfirst=True, fuzzy=True)
+        except Exception:
+            cleaned = s.replace("pm", "").replace("am", "").replace("PM", "").replace("AM", "")
+            out = dtparser.parse(cleaned, dayfirst=True, fuzzy=True)
     if out.tzinfo is None:
         out = out.replace(tzinfo=timezone.utc)
     return out

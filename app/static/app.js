@@ -261,6 +261,22 @@ const RENDER = {
       <input id="set_meeting_note" value="${biz.meeting_note||''}" placeholder="Točno mjesto polaska dogovaramo nakon rezervacije.">
       <label>Zadani depozit (%)</label><input id="set_dep" type="number" min="0" max="100" value="${biz.default_deposit_percent||30}">
       <label>Jet ski — doplata za 2. osobu (€)</label><input id="set_extra" type="number" min="0" step="1" value="${biz.jetski_extra_person_fee!=null?biz.jetski_extra_person_fee:20}">
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line)">
+        <div style="font-weight:700;font-size:14px;margin-bottom:4px">Email potvrde gostu</div>
+        <div style="font-size:12px;color:var(--mut);margin-bottom:10px">Poruka koju gost dobije nakon plaćanja depozita. Ostavi prazno za zadani tekst. Možeš koristiti <code>{business}</code> za naziv tvrtke.</div>
+        <label>Naslov emaila</label>
+        <input id="set_cemail_subj" value="${(biz.confirm_email_subject||'').replace(/"/g,'&quot;')}" placeholder="Booking Confirmation">
+        <label>Tekst emaila</label>
+        <textarea id="set_cemail_body" style="width:100%;height:120px;resize:vertical" placeholder="Your booking is confirmed. The confirmation is attached as a PDF.&#10;&#10;Thank you for your booking! We look forward to seeing you.&#10;&#10;{business}">${(biz.confirm_email_body||'').replace(/</g,'&lt;')}</textarea>
+      </div>
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line)">
+        <div style="font-weight:700;font-size:14px;margin-bottom:4px">Lokacije polaska + WhatsApp</div>
+        <div style="font-size:12px;color:var(--mut);margin-bottom:10px">Dodane lokacije šalju se gostu u email potvrdi — svaka s Google Maps linkom. Gost bira koja mu odgovara.</div>
+        <label>WhatsApp broj (za "Otvori chat" dugme u mailu)</label>
+        <input id="set_wa" value="${(biz.whatsapp_number||'').replace(/"/g,'&quot;')}" placeholder="+385 91 234 5678">
+        <div id="mp_list" style="margin-top:12px"></div>
+        <button class="btn btn-sm btn-ghost" onclick="addMeetingPoint()">+ Dodaj lokaciju</button>
+      </div>
       <div style="margin:12px 0 20px"><button class="btn" onclick="saveBusiness()">Spremi brendove</button>
       <span id="biz_msg" style="margin-left:12px;color:var(--good);font-size:13px"></span></div>
       <h3>Minimalno vrijeme rezervacije unaprijed</h3>
@@ -271,6 +287,8 @@ const RENDER = {
       <div style="margin-top:16px"><button class="btn" onclick="saveLeadTimes()">Spremi</button>
       <span id="lt_msg" style="margin-left:12px;color:var(--good);font-size:13px"></span></div>
     </div>`;
+    MP = Array.isArray(biz.meeting_points) ? biz.meeting_points.slice() : [];
+    renderMeetingPoints();
   },
   'Customers': async (v)=>{
     const c = await api('/api/customers');
@@ -1065,6 +1083,25 @@ function openVoucher(id){
   window.open('/api/bookings/'+id+'/voucher?token='+encodeURIComponent(t), '_blank');
 }
 
+let MP = [];
+function renderMeetingPoints(){
+  const box=document.getElementById('mp_list');
+  if(!box) return;
+  if(!MP.length){ box.innerHTML='<div style="font-size:12px;color:var(--mut);padding:6px 0">Još nema lokacija. Dodaj barem jednu.</div>'; return; }
+  box.innerHTML = MP.map((p,i)=>`
+    <div style="border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px">
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+        <input value="${(p.name||'').replace(/"/g,'&quot;')}" placeholder="Naziv (npr. Rixos Dubrovnik)" oninput="MP[${i}].name=this.value" style="flex:1">
+        <button class="btn btn-sm btn-ghost" onclick="delMeetingPoint(${i})">✕</button>
+      </div>
+      <input value="${(p.maps_url||'').replace(/"/g,'&quot;')}" placeholder="Google Maps link (https://maps.google.com/...)" oninput="MP[${i}].maps_url=this.value" style="width:100%;margin-bottom:6px">
+      <input value="${(p.note||'').replace(/"/g,'&quot;')}" placeholder="Kratke upute (npr. ponton ispred hotela)" oninput="MP[${i}].note=this.value" style="width:100%">
+    </div>`).join('');
+}
+function addMeetingPoint(){ MP.push({name:'',maps_url:'',note:''}); renderMeetingPoints(); }
+function delMeetingPoint(i){ MP.splice(i,1); renderMeetingPoints(); }
+function collectMeetingPoints(){ return MP.filter(p=>(p.name||'').trim()); }
+
 async function saveBusiness(){
   try{
     await api('/api/settings/business',{method:'PUT',body:JSON.stringify({
@@ -1074,6 +1111,10 @@ async function saveBusiness(){
       business_oib:val('set_oib'),
       meeting_arranged:document.getElementById('set_meeting')?document.getElementById('set_meeting').checked:false,
       meeting_note:val('set_meeting_note'),
+      confirm_email_subject:val('set_cemail_subj'),
+      confirm_email_body:document.getElementById('set_cemail_body')?document.getElementById('set_cemail_body').value:'',
+      whatsapp_number:val('set_wa'),
+      meeting_points:collectMeetingPoints(),
       jetski_extra_person_fee:+val('set_extra')||0,
       default_deposit_percent:+val('set_dep')||30})});
     const m=document.getElementById('biz_msg'); if(m) m.textContent='Spremljeno ✓';

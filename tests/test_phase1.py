@@ -1807,3 +1807,59 @@ def test_rebuild_units_from_catalog():
     db.commit()
     ts.rebuild_units_from_catalog(db, "jetski")
     db.close()
+
+
+def test_custom_confirmation_email():
+    """Admin can override the confirmation email subject/body; {business} fills in."""
+    from app.services import confirmation_service
+    # default when nothing custom
+    s, b = confirmation_service.email_text("en", "Jetski Dubrovnik")
+    assert s == "Booking Confirmation"
+    # custom overrides + placeholder
+    s2, b2 = confirmation_service.email_text(
+        "en", "Jetski Dubrovnik",
+        custom_subject="See you in Dubrovnik!",
+        custom_body="Your trip is confirmed. Bring a towel!\n\n{business}")
+    assert s2 == "See you in Dubrovnik!"
+    assert "Bring a towel" in b2
+    assert "Jetski Dubrovnik" in b2  # {business} replaced
+
+
+def test_parse_iso_date_not_swapped():
+    """ISO dates must not have month/day swapped (regression: dayfirst broke ISO)."""
+    from app.ai.tools import _parse
+    from datetime import datetime, timezone, timedelta
+    future = datetime.now(timezone.utc) + timedelta(days=5)
+    out = _parse(future.isoformat())
+    # should be ~5 days ahead, not months in the past
+    diff_h = (out - datetime.now(timezone.utc)).total_seconds() / 3600
+    assert diff_h > 100  # ~120h, definitely future
+    # human day-first format still works
+    out2 = _parse("20/08/2026 10am")
+    assert out2.day == 20 and out2.month == 8
+
+
+def test_meeting_points_and_whatsapp_in_email():
+    """Meeting points + WhatsApp render into the confirmation email block."""
+    from app.core.database import SessionLocal
+    from app.services import meeting_service
+    db = SessionLocal()
+    meeting_service.set_meeting_points(db, [
+        {"name": "Rixos Dubrovnik", "maps_url": "https://maps.google.com/?q=Rixos",
+         "note": "Ponton ispred hotela"},
+        {"name": "Gruz", "maps_url": "https://maps.google.com/?q=Gruz", "note": ""},
+    ])
+    meeting_service.set_whatsapp_number(db, "+385 91 234 5678")
+    db.commit()
+    block = meeting_service.meeting_block_text(db, "en")
+    assert "Rixos Dubrovnik" in block
+    assert "maps.google.com" in block
+    assert "wa.me/385912345678" in block  # wa link built from digits
+    # wa_link helper strips non-digits
+    assert meeting_service.wa_link("+385 (91) 234-5678") == "https://wa.me/385912345678"
+    # empty when nothing configured
+    meeting_service.set_meeting_points(db, [])
+    meeting_service.set_whatsapp_number(db, "")
+    db.commit()
+    assert meeting_service.meeting_block_text(db, "en") == ""
+    db.close()

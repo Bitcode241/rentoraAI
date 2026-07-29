@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import get_current_user, require_admin
 from app.services import settings_service
+from app.services import meeting_service
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -40,6 +41,10 @@ def get_business(db: Session = Depends(get_db), _=Depends(get_current_user)):
         "business_oib": settings_service.get(db, "business_oib", "") or "",
         "meeting_arranged": (settings_service.get(db, "meeting_arranged", "0") or "0") == "1",
         "meeting_note": settings_service.get(db, "meeting_note", "") or "",
+        "confirm_email_subject": settings_service.get(db, "confirm_email_subject", "") or "",
+        "confirm_email_body": settings_service.get(db, "confirm_email_body", "") or "",
+        "meeting_points": meeting_service.get_meeting_points(db),
+        "whatsapp_number": meeting_service.get_whatsapp_number(db),
         "default_deposit_percent": settings_service.default_deposit_percent(db),
         "jetski_extra_person_fee": settings_service.jetski_extra_person_fee(db),
         "brand_boat": settings_service.brand_for_type(db, "boat"),
@@ -64,6 +69,16 @@ def update_business(payload: dict, db: Session = Depends(get_db)):
                              "1" if payload["meeting_arranged"] else "0")
     if "meeting_note" in payload:
         settings_service.set(db, "meeting_note", str(payload["meeting_note"]).strip())
+    if "confirm_email_subject" in payload:
+        settings_service.set(db, "confirm_email_subject",
+                             str(payload["confirm_email_subject"]).strip())
+    if "confirm_email_body" in payload:
+        settings_service.set(db, "confirm_email_body",
+                             str(payload["confirm_email_body"]).strip())
+    if "meeting_points" in payload and isinstance(payload["meeting_points"], list):
+        meeting_service.set_meeting_points(db, payload["meeting_points"])
+    if "whatsapp_number" in payload:
+        meeting_service.set_whatsapp_number(db, str(payload["whatsapp_number"]))
     if "default_deposit_percent" in payload:
         settings_service.set(db, settings_service.DEFAULT_DEPOSIT_KEY,
                              str(payload["default_deposit_percent"]))

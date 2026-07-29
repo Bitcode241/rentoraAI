@@ -282,6 +282,18 @@ def build_pdf(*, lang, business_name, booking_id, asset_name, when, guests,
     return buf.read()
 
 
-def email_text(lang: str, business_name: str) -> tuple:
+def email_text(lang: str, business_name: str,
+               custom_subject: str = "", custom_body: str = "") -> tuple:
+    """Build the confirmation email. If the owner set a custom subject/body in the
+    admin, use those (with {name}/{business} placeholders); otherwise fall back to
+    the built-in per-language text."""
     tr = _t(lang)
-    return tr["subject"], f"{tr['intro']}\n\n{tr['thanks']}\n\n{business_name or 'Rentora'}"
+    subject = custom_subject.strip() or tr["subject"]
+    if custom_body.strip():
+        body = custom_body.strip()
+    else:
+        body = f"{tr['intro']}\n\n{tr['thanks']}\n\n{business_name or 'Rentora'}"
+    # allow a {business} placeholder in custom text
+    subject = subject.replace("{business}", business_name or "Rentora")
+    body = body.replace("{business}", business_name or "Rentora")
+    return subject, body

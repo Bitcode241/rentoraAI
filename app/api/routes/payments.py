@@ -223,7 +223,16 @@ def _send_confirmation(db, booking, group=None):
         guest_email=cust.email or "",
         transfer_note=getattr(booking, "transfer_note", "") or "",
         currency="EUR")
-    subject, body = confirmation_service.email_text(lang, business)
+    from app.services import settings_service as _ss
+    custom_subject = _ss.get(db, "confirm_email_subject", "") or ""
+    custom_body = _ss.get(db, "confirm_email_body", "") or ""
+    subject, body = confirmation_service.email_text(
+        lang, business, custom_subject=custom_subject, custom_body=custom_body)
+    # append the meeting-points + WhatsApp block (locations, map pins, chat link)
+    from app.services import meeting_service
+    mblock = meeting_service.meeting_block_text(db, lang)
+    if mblock:
+        body = f"{body}\n\n{mblock}"
     mgr = MultiMailboxManager.from_db(db)
     if mgr.enabled:
         from_box = next(iter(mgr.services.keys()), "")

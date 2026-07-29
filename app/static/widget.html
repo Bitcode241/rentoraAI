@@ -278,7 +278,10 @@ async function init(){
     // meeting-point arranged privately (for spots not advertised online)
     if(CFG.meeting_arranged){
       const mn=$('meeting-note');
-      mn.textContent = CFG.meeting_note || T.meetingArranged;
+      // A custom admin note is written in Croatian, so use it only when the widget
+      // is Croatian; English/German guests always get the translated version.
+      const custom=(CFG.meeting_note||'').trim();
+      mn.textContent = (custom && LANG==='hr') ? custom : T.meetingArranged;
       mn.style.display='block';
     }
     // fewer clicks: if there's only one model, select it automatically and
