@@ -210,6 +210,7 @@ def _send_confirmation(db, booking, group=None):
     import re as _re
     base_name = _re.sub(r"\s*\(\d+\)\s*$", "", asset.name).strip() if asset else "—"
     asset_label = f"{qty}× {base_name}" if qty > 1 else (asset.name if asset else "—")
+    from app.services import meeting_service as _ms
     pdf = confirmation_service.build_pdf(
         lang=lang, business_name=business, booking_id=booking.id,
         asset_name=asset_label, when=when,
@@ -222,6 +223,7 @@ def _send_confirmation(db, booking, group=None):
         guest_name=(cust.full_name or "") if (cust.full_name and cust.full_name != cust.email) else "",
         guest_email=cust.email or "",
         transfer_note=getattr(booking, "transfer_note", "") or "",
+        contact_phone=_ms.get_whatsapp_number(db),
         currency="EUR")
     from app.services import settings_service as _ss
     custom_subject = _ss.get(db, "confirm_email_subject", "") or ""

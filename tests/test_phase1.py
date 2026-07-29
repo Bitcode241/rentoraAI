@@ -1895,3 +1895,27 @@ def test_primary_location_prominent_others_on_request():
     pts2 = meeting_service.get_meeting_points(db)
     assert pts2[0]["primary"] is True and pts2[1]["primary"] is False
     db.close()
+
+
+def test_pdf_shows_contact_phone_not_reply():
+    """When a contact phone is given, the PDF footer shows it instead of reply-to."""
+    import io
+    from pypdf import PdfReader
+    from app.services import confirmation_service as cs
+    pdf = cs.build_pdf(lang="en", business_name="X", booking_id=1, asset_name="Y",
+                       when="", guests=2, package="1h", deposit_paid=42,
+                       full_price=140, balance=98, transfer_included=False,
+                       location="Rixos", phone="", guest_name="T",
+                       guest_email="t@x.com", contact_phone="+385 91 916 7163",
+                       currency="EUR")
+    txt = "".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages)
+    assert "+385 91 916 7163" in txt
+    assert "reply to this" not in txt
+    # without a phone, falls back to the reply-to line
+    pdf2 = cs.build_pdf(lang="en", business_name="X", booking_id=1, asset_name="Y",
+                        when="", guests=2, package="1h", deposit_paid=42,
+                        full_price=140, balance=98, transfer_included=False,
+                        location="Rixos", phone="", guest_name="T",
+                        guest_email="t@x.com", currency="EUR")
+    txt2 = "".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf2)).pages)
+    assert "reply to this email" in txt2

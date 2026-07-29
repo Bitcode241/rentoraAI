@@ -117,7 +117,7 @@ def _register_fonts():
 def build_pdf(*, lang, business_name, booking_id, asset_name, when, guests,
               package, deposit_paid, full_price, balance, transfer_included,
               location, phone="", guest_name="", guest_email="",
-              transfer_note="", currency="EUR") -> bytes:
+              transfer_note="", contact_phone="", currency="EUR") -> bytes:
     """Return a polished, professional PDF confirmation as bytes."""
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
@@ -269,7 +269,14 @@ def build_pdf(*, lang, business_name, booking_id, asset_name, when, guests,
     c.drawString(20 * mm, 34 * mm, tr["thanks"])
     c.setFillColor(grey)
     c.setFont(font_reg, 9)
-    c.drawString(20 * mm, 27 * mm, tr["questions"])
+    if contact_phone:
+        contact_lbl = {"hr": "Za sva pitanja nazovite ili pišite:",
+                       "de": "Bei Fragen rufen Sie an oder schreiben Sie:",
+                       "en": "For any questions, call or message us:"}.get(lang,
+                       "For any questions, call or message us:")
+        c.drawString(20 * mm, 27 * mm, f"{contact_lbl} {contact_phone}")
+    else:
+        c.drawString(20 * mm, 27 * mm, tr["questions"])
     # bottom accent
     c.setFillColor(gold)
     c.rect(0, 0, w, 6 * mm, fill=1, stroke=0)
