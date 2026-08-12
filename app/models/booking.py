@@ -34,6 +34,11 @@ class Booking(Base):
     # public token embedded in the voucher QR; lets a skipper view the booking
     # details by scanning, without logging in. Generated on first voucher build.
     voucher_token: Mapped[str] = mapped_column(String(64), default="", index=True)
+    # marketing attribution — where this booking came from (Google Ads, WhatsApp, etc.)
+    utm_source: Mapped[str] = mapped_column(String(120), default="", index=True)
+    utm_medium: Mapped[str] = mapped_column(String(120), default="")
+    utm_campaign: Mapped[str] = mapped_column(String(120), default="")
+    gclid: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     asset = relationship("Asset")

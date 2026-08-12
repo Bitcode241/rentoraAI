@@ -14,6 +14,14 @@ def admin():
     return FileResponse("app/static/admin.html", media_type="text/html")
 
 
+@router.get("/api/dashboard/sources")
+def dashboard_sources(db: Session = Depends(get_db),
+                      _=Depends(get_current_user)):
+    """Where paid bookings came from (Google Ads, WhatsApp, Instagram, direct...)."""
+    from app.services import attribution_service
+    return {"sources": attribution_service.source_report(db, only_paid=True)}
+
+
 @router.get("/api/dashboard/overview")
 def dashboard_overview(days: int = 7, db: Session = Depends(get_db),
                        _=Depends(get_current_user)):

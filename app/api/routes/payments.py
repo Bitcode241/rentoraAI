@@ -54,6 +54,11 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         metadata = session.get("metadata") or {}
         booking_id = metadata.get("booking_id")
         group_csv = metadata.get("group_booking_ids") or ""
+        # marketing attribution from Stripe metadata (source of truth)
+        m_source = (metadata.get("utm_source") or "")[:120]
+        m_medium = (metadata.get("utm_medium") or "")[:120]
+        m_campaign = (metadata.get("utm_campaign") or "")[:120]
+        m_gclid = (metadata.get("gclid") or "")[:255]
         amount_total = session.get("amount_total") or 0
         payment_intent = session.get("payment_intent") or ""
         # this single payment may cover several units (e.g. 2 jet skis)
@@ -71,6 +76,12 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 b.payment_status = "deposit_paid"
                 b.amount_paid = round(paid_total * share, 2)
                 b.stripe_payment_intent = payment_intent
+                # backfill attribution from Stripe if the booking didn't capture it
+                if m_source and not getattr(b, "utm_source", ""):
+                    b.utm_source = m_source
+                    b.utm_medium = m_medium
+                    b.utm_campaign = m_campaign
+                    b.gclid = m_gclid
                 if b.status in ("pending",):
                     b.status = "confirmed"
             db.commit()

@@ -188,6 +188,15 @@
 const TYPE = location.pathname.split('/').pop() || 'jetski';
 // Optional single-tour embed: ?tour=ID shows only that tour.
 const TOUR_ID = new URLSearchParams(location.search).get('tour') || '';
+// marketing attribution from the iframe URL (?utm_source=...&gclid=...)
+const _q = new URLSearchParams(location.search);
+const ATTR = {
+  utm_source:   _q.get('utm_source')   || '',
+  utm_medium:   _q.get('utm_medium')   || '',
+  utm_campaign: _q.get('utm_campaign') || '',
+  utm_term:     _q.get('utm_term')     || '',
+  gclid:        _q.get('gclid')        || '',
+};
 const API = '/api/public';
 // Language: English is the default for everyone (guests are foreign tourists).
 // A guest who wants another language can pass ?lang=hr or ?lang=de explicitly.
@@ -497,7 +506,8 @@ async function submit(){
     const r=await fetch(`${API}/book`,{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({asset_id:S.asset.id,package_id:S.pkg.id,start,qty:S.qty,passengers:S.pax,
         name,email,phone,addon_ids:[...S.addons],lang:LANG,
-        transfer_location:S.transfer?S.transfer.location:'',transfer_round_trip:S.transfer?S.transfer.round_trip:false})}).then(x=>x.json());
+        transfer_location:S.transfer?S.transfer.location:'',transfer_round_trip:S.transfer?S.transfer.round_trip:false,
+        ...ATTR})}).then(x=>x.json());
     if(r.checkout_url){
       // Stripe Checkout refuses to load inside an iframe. If we're embedded,
       // redirect the TOP window; otherwise redirect normally.

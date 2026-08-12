@@ -45,6 +45,8 @@ def get_business(db: Session = Depends(get_db), _=Depends(get_current_user)):
         "confirm_email_body": settings_service.get(db, "confirm_email_body", "") or "",
         "meeting_points": meeting_service.get_meeting_points(db),
         "whatsapp_number": meeting_service.get_whatsapp_number(db),
+        "google_ads_id": settings_service.get(db, "google_ads_id", "") or "",
+        "google_ads_label": settings_service.get(db, "google_ads_label", "") or "",
         "default_deposit_percent": settings_service.default_deposit_percent(db),
         "jetski_extra_person_fee": settings_service.jetski_extra_person_fee(db),
         "brand_boat": settings_service.brand_for_type(db, "boat"),
@@ -79,6 +81,10 @@ def update_business(payload: dict, db: Session = Depends(get_db)):
         meeting_service.set_meeting_points(db, payload["meeting_points"])
     if "whatsapp_number" in payload:
         meeting_service.set_whatsapp_number(db, str(payload["whatsapp_number"]))
+    if "google_ads_id" in payload:
+        settings_service.set(db, "google_ads_id", str(payload["google_ads_id"]).strip())
+    if "google_ads_label" in payload:
+        settings_service.set(db, "google_ads_label", str(payload["google_ads_label"]).strip())
     if "default_deposit_percent" in payload:
         settings_service.set(db, settings_service.DEFAULT_DEPOSIT_KEY,
                              str(payload["default_deposit_percent"]))

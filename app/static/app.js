@@ -1,12 +1,13 @@
 const API = '';
 let TOKEN = '';
 let DASH = null;
-const PAGES = ['Dashboard','Calendar','Assets','Tours','Transfers','Add-ons','Widget','Bookings','Customers','Email Inbox','Mail Settings',
+const PAGES = ['Dashboard','Calendar','Assets','Tours','Transfers','Add-ons','Widget','Bookings','Izvori','Customers','Email Inbox','Mail Settings',
   'Settings',
   'Revenue Overview','Upcoming Reservations',
   "Today's Reservations",'Recent Conversations'];
 const SUBS = {
   'Dashboard':'Live operational overview',
+  'Izvori':'Odakle dolaze gosti (Google Ads, WhatsApp...)',
   'Tours':'Katalog tura — jedna tura, jedan ID',
   'Assets':'Fleet — boats & jet skis',
   'Transfers':'Pickup / drop-off zones & prices',
@@ -130,6 +131,41 @@ const RENDER = {
       <td class="row-actions"><button class="btn btn-sm btn-ghost" onclick="radiusModal(${r.id})">Uredi</button>
       <button class="btn btn-sm btn-ghost" onclick="delRadius(${r.id})">Obriši</button></td></tr>`).join('')
       ||'<tr><td colspan=6 class="empty">Nema GPS zona — dodaj prvu</td></tr>'}</tbody></table></div>`;
+  },
+  'Izvori': async (v)=>{
+    const d = await api('/api/dashboard/sources');
+    const rows = d.sources || [];
+    const totalRev = rows.reduce((s,r)=>s+(r.revenue||0),0);
+    const totalBk = rows.reduce((s,r)=>s+(r.bookings||0),0);
+    v.innerHTML = `
+      <div style="display:flex;gap:14px;margin-bottom:16px;flex-wrap:wrap">
+        <div class="panel" style="flex:1;min-width:160px;padding:16px">
+          <div style="font-size:12px;color:var(--mut);text-transform:uppercase">Ukupno rezervacija</div>
+          <div style="font-size:26px;font-weight:800">${totalBk}</div></div>
+        <div class="panel" style="flex:1;min-width:160px;padding:16px">
+          <div style="font-size:12px;color:var(--mut);text-transform:uppercase">Ukupan prihod</div>
+          <div style="font-size:26px;font-weight:800">${money(totalRev)}</div></div>
+      </div>
+      <div class="panel" style="padding:0;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse;font-size:14px">
+          <thead><tr style="text-align:left;background:var(--bg)">
+            <th style="padding:11px 14px">Izvor</th><th>Rezervacija</th><th>Prihod</th><th>Depoziti</th><th>Udio</th><th>Kampanje</th></tr></thead>
+          <tbody>
+          ${rows.length ? rows.map(r=>{
+            const pct = totalRev>0 ? Math.round((r.revenue/totalRev)*100) : 0;
+            return `<tr style="border-top:1px solid var(--line)">
+              <td style="padding:11px 14px"><b>${r.source}</b></td>
+              <td>${r.bookings}×</td>
+              <td><b>${money(r.revenue)}</b></td>
+              <td>${money(r.deposits)}</td>
+              <td><div style="display:flex;align-items:center;gap:8px"><div style="flex:1;max-width:90px;height:7px;background:var(--line);border-radius:4px;overflow:hidden"><div style="width:${pct}%;height:100%;background:var(--accent)"></div></div><span style="font-size:12px;color:var(--mut)">${pct}%</span></div></td>
+              <td style="font-size:12px;color:var(--mut)">${(r.campaigns||[]).join(', ')||'—'}</td>
+            </tr>`;
+          }).join('') : '<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--mut)">Još nema plaćenih rezervacija s izvorom. Kad gosti počnu dolaziti preko UTM linkova, ovdje ćeš vidjeti odakle.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:12px;color:var(--mut);margin-top:12px">Izvor se bilježi kad gost dođe preko linka s <code>?utm_source=...</code> (npr. Google Ads, WhatsApp). Rezervacije bez izvora prikazuju se kao "Direct".</p>`;
   },
   'Tours': async (v)=>{
     const [tours, report] = await Promise.all([
@@ -276,6 +312,14 @@ const RENDER = {
         <input id="set_wa" value="${(biz.whatsapp_number||'').replace(/"/g,'&quot;')}" placeholder="+385 91 234 5678">
         <div id="mp_list" style="margin-top:12px"></div>
         <button class="btn btn-sm btn-ghost" onclick="addMeetingPoint()">+ Dodaj lokaciju</button>
+      </div>
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line)">
+        <div style="font-weight:700;font-size:14px;margin-bottom:4px">Google Ads praćenje konverzija</div>
+        <div style="font-size:12px;color:var(--mut);margin-bottom:10px">Kad plaćanje uspije, javlja se Google Adsu. Upiši iz svog Google Ads računa (Tools → Conversions). Ostavi prazno ako ne koristiš Ads.</div>
+        <label>Conversion ID (npr. AW-1234567890)</label>
+        <input id="set_ads_id" value="${(biz.google_ads_id||'').replace(/"/g,'&quot;')}" placeholder="AW-XXXXXXXXXX">
+        <label>Conversion Label</label>
+        <input id="set_ads_label" value="${(biz.google_ads_label||'').replace(/"/g,'&quot;')}" placeholder="abcDEFghiJKL">
       </div>
       <div style="margin:12px 0 20px"><button class="btn" onclick="saveBusiness()">Spremi brendove</button>
       <span id="biz_msg" style="margin-left:12px;color:var(--good);font-size:13px"></span></div>
@@ -1118,6 +1162,8 @@ async function saveBusiness(){
       confirm_email_subject:val('set_cemail_subj'),
       confirm_email_body:document.getElementById('set_cemail_body')?document.getElementById('set_cemail_body').value:'',
       whatsapp_number:val('set_wa'),
+      google_ads_id:val('set_ads_id'),
+      google_ads_label:val('set_ads_label'),
       meeting_points:collectMeetingPoints(),
       jetski_extra_person_fee:+val('set_extra')||0,
       default_deposit_percent:+val('set_dep')||30})});

@@ -28,12 +28,15 @@ def _client():
 
 def create_deposit_checkout(booking, asset_name: str, guest_email: str = "",
                             override_amount: float = None,
-                            group_booking_ids: list = None) -> dict:
+                            group_booking_ids: list = None,
+                            attribution: dict = None) -> dict:
     """Create a Stripe Checkout Session for the booking deposit.
     override_amount: charge this instead of booking.deposit_amount (for multi-unit
     bookings where several units share one checkout).
     group_booking_ids: all booking ids this single payment covers, so the webhook
     can mark them all paid.
+    attribution: {source, medium, campaign, term, gclid} — marketing source, stored
+    in Stripe metadata and later on the booking for reporting.
     Returns {url, session_id} or {error}."""
     stripe = _client()
     if not stripe:
@@ -45,6 +48,17 @@ def create_deposit_checkout(booking, asset_name: str, guest_email: str = "",
         return {"error": "no_deposit", "message": "Iznos depozita je 0."}
 
     amount_cents = int(round(deposit * 100))  # Stripe radi u centima
+    attr = attribution or {}
+    meta = {
+        "booking_id": str(booking.id),
+        "group_booking_ids": ",".join(
+            str(x) for x in (group_booking_ids or [booking.id])),
+        "utm_source": (attr.get("source") or "")[:400],
+        "utm_medium": (attr.get("medium") or "")[:400],
+        "utm_campaign": (attr.get("campaign") or "")[:400],
+        "utm_term": (attr.get("term") or "")[:400],
+        "gclid": (attr.get("gclid") or "")[:400],
+    }
     try:
         session = stripe.checkout.Session.create(
             mode="payment",
@@ -61,14 +75,13 @@ def create_deposit_checkout(booking, asset_name: str, guest_email: str = "",
                 "quantity": 1,
             }],
             customer_email=guest_email or None,
-            metadata={"booking_id": str(booking.id),
-                      "group_booking_ids": ",".join(
-                          str(x) for x in (group_booking_ids or [booking.id]))},
-            success_url=f"{settings.public_base_url}/pay/success?booking={booking.id}",
+            metadata=meta,
+            success_url=f"{settings.public_base_url}/pay/success?session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{settings.public_base_url}/pay/cancel?booking={booking.id}",
         )
         log.info("stripe_checkout_created", booking_id=booking.id,
-                 session=session.id, amount=deposit)
+                 session=session.id, amount=deposit,
+                 source=meta["utm_source"] or "direct")
         return {"url": session.url, "session_id": session.id}
     except Exception as e:  # pragma: no cover
         log.warning("stripe_checkout_failed", booking_id=booking.id, error=str(e))

@@ -1161,7 +1161,7 @@ def test_addons_in_deposit_and_passengers_min():
     from app.models.booking import Booking
     from app.api.routes import public_booking as pb
     import app.services.payment_service as ps
-    ps.create_deposit_checkout = lambda b, name, guest_email="", override_amount=None, group_booking_ids=None: {"url": "http://t", "session_id": "x"}
+    ps.create_deposit_checkout = lambda b, name, guest_email="", override_amount=None, group_booking_ids=None, attribution=None: {"url": "http://t", "session_id": "x"}
     db = SessionLocal()
     for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
         j.model_group = "yamaha-vx"
@@ -1193,7 +1193,7 @@ def test_widget_transfer_in_deposit(monkeypatch):
     import app.services.geo_service as g
     import app.services.payment_service as ps
     monkeypatch.setattr(ps, "create_deposit_checkout",
-                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None: {"url": "http://t", "session_id": "x"})
+                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None, attribution=None: {"url": "http://t", "session_id": "x"})
     db = SessionLocal()
     for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
         j.model_group = "yamaha-vx"
@@ -1239,7 +1239,7 @@ def test_widget_transfer_stores_pickup(monkeypatch):
     import app.services.geo_service as g
     import app.services.payment_service as ps
     monkeypatch.setattr(ps, "create_deposit_checkout",
-                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None: {"url": "http://t", "session_id": "x"})
+                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None, attribution=None: {"url": "http://t", "session_id": "x"})
     db = SessionLocal()
     for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
         j.model_group = "yamaha-vx"
@@ -1314,7 +1314,7 @@ def test_partner_widget_charges_only_commission(monkeypatch):
     import app.services.payment_service as ps
     captured = {}
 
-    def fake(b, name, guest_email="", override_amount=None, group_booking_ids=None):
+    def fake(b, name, guest_email="", override_amount=None, group_booking_ids=None, attribution=None):
         captured["amount"] = override_amount
         return {"url": "http://t", "session_id": "x"}
     monkeypatch.setattr(ps, "create_deposit_checkout", fake)
@@ -1539,7 +1539,7 @@ def test_widget_blocks_past_and_too_soon(monkeypatch):
     from datetime import datetime, timezone, timedelta
     import app.services.payment_service as ps
     monkeypatch.setattr(ps, "create_deposit_checkout",
-                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None: {"url": "http://t", "session_id": "x"})
+                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None, attribution=None: {"url": "http://t", "session_id": "x"})
     db = SessionLocal()
     for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
         j.model_group = "yamaha-vx"
@@ -1604,7 +1604,7 @@ def test_meeting_arranged_flow(monkeypatch):
     import app.services.payment_service as ps
     from datetime import date, timedelta
     monkeypatch.setattr(ps, "create_deposit_checkout",
-                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None: {"url": "http://t", "session_id": "x"})
+                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None, attribution=None: {"url": "http://t", "session_id": "x"})
     db = SessionLocal()
     for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
         j.model_group = "yamaha-vx"
@@ -1919,3 +1919,42 @@ def test_pdf_shows_contact_phone_not_reply():
                         guest_email="t@x.com", currency="EUR")
     txt2 = "".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf2)).pages)
     assert "reply to this email" in txt2
+
+
+def test_attribution_stored_and_reported(monkeypatch):
+    """Widget UTM is stored on the booking and grouped in the source report."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.booking import Booking
+    from app.api.routes import public_booking as pb
+    from app.services import attribution_service
+    import app.services.payment_service as ps
+    from datetime import date, timedelta
+    monkeypatch.setattr(ps, "create_deposit_checkout",
+                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None, attribution=None: {"url": "http://t", "session_id": "x"})
+    db = SessionLocal()
+    for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
+        j.model_group = "yamaha-vx"
+    db.commit()
+    anchor = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    pkg = pb.public_assets("jetski", db=db)[0]["packages"][1]
+    start = (date.today() + timedelta(days=3)).isoformat() + "T10:00:00"
+    r = pb.public_book({"asset_id": anchor.id, "package_id": pkg["id"],
+                        "start": start, "qty": 1, "passengers": 1,
+                        "name": "G", "email": "attr@x.com", "phone": "1",
+                        "utm_source": "google", "utm_campaign": "summer",
+                        "gclid": "ABC123"}, request=None, db=db)
+    b = db.get(Booking, r["booking_id"])
+    assert b.utm_source == "google"
+    assert b.utm_campaign == "summer"
+    assert b.gclid == "ABC123"
+    # mark paid so it shows in the report
+    b.payment_status = "deposit_paid"; b.amount_paid = 45; b.total_price = 150
+    db.commit()
+    rep = attribution_service.source_report(db)
+    google = next((x for x in rep if x["raw_source"] == "google"), None)
+    assert google and google["bookings"] >= 1
+    assert google["source"] == "Google Ads"  # friendly label
+    # empty source -> Direct label
+    assert attribution_service._label("") == "Direct / bez izvora"
+    db.close()

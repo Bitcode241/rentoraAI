@@ -265,6 +265,15 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
         db.commit()
     # remember the widget's language so the PDF/email go out in the same language
     wlang = (payload.get("lang") or "").strip().lower()[:2]
+    # marketing attribution (UTM + Google Ads gclid) — stored on the booking and
+    # passed to Stripe metadata so we can report source of every paid booking.
+    attribution = {
+        "source": (payload.get("utm_source") or "").strip()[:120],
+        "medium": (payload.get("utm_medium") or "").strip()[:120],
+        "campaign": (payload.get("utm_campaign") or "").strip()[:120],
+        "term": (payload.get("utm_term") or "").strip()[:120],
+        "gclid": (payload.get("gclid") or "").strip()[:255],
+    }
     if wlang in ("hr", "en", "de") and cust.language != wlang:
         cust.language = wlang
         db.commit()
@@ -286,6 +295,11 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
         from app.services import tour_service
         b.tour_type_id = tour_service.match_tour_id(
             db, anchor.asset_type, pkg["name"], pkg["duration_minutes"])
+        # store marketing source on every unit-booking for reporting
+        b.utm_source = attribution["source"]
+        b.utm_medium = attribution["medium"]
+        b.utm_campaign = attribution["campaign"]
+        b.gclid = attribution["gclid"]
         db.commit()
         if i == 0 and (addons_total or extra_person_total or transfer_total):
             b.total_price = (b.total_price or 0) + addons_total + extra_person_total + transfer_total
@@ -344,7 +358,8 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
 
     pay = payment_service.create_deposit_checkout(
         lead, label, guest_email=email, override_amount=charge_amount,
-        group_booking_ids=[b.id for b in bookings])
+        group_booking_ids=[b.id for b in bookings],
+        attribution=attribution)
     if not pay.get("url"):
         return {"error": "payment_failed", "booking_id": lead.id}
     log.info("public_booking_created", booking_id=lead.id, asset=anchor.name,
@@ -426,12 +441,30 @@ def voucher_view_data(token: str, db: Session = Depends(get_db)):
 from fastapi.responses import HTMLResponse
 
 
-def _result_page(title, msg, ok=True):
+def _result_page(title, msg, ok=True, conversion=None):
     color = "#1a8a5a" if ok else "#c0392b"
     icon = "✓" if ok else "✕"
+    conv_html = ""
+    if conversion and conversion.get("amount", 0) > 0 and conversion.get("ads_id"):
+        label = conversion.get("ads_label", "")
+        send_to = conversion["ads_id"] + (f"/{label}" if label else "")
+        conv_html = f"""
+<script async src="https://www.googletagmanager.com/gtag/js?id={conversion['ads_id']}"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){{dataLayer.push(arguments);}}
+  gtag('js', new Date());
+  gtag('config', '{conversion['ads_id']}');
+  gtag('event', 'conversion', {{
+    'send_to': '{send_to}',
+    'value': {conversion['amount']},
+    'currency': '{conversion['currency']}',
+    'transaction_id': '{conversion.get('booking_id','')}'
+  }});
+</script>"""
     return HTMLResponse(f"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{title}</title><style>
+<title>{title}</title>{conv_html}<style>
 body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
 background:#f6f9fb;color:#0f2230;display:grid;place-items:center;min-height:100vh;margin:0}}
 .box{{background:#fff;border-radius:18px;box-shadow:0 8px 30px rgba(16,40,56,.1);
@@ -445,13 +478,29 @@ h1{{font-size:22px;margin:0 0 8px}}p{{color:#6a7e8c;line-height:1.5;margin:0}}
 
 
 @widget_router.get("/pay/success")
-def pay_success():
+def pay_success(session_id: str = "", db: Session = Depends(get_db)):
+    from app.services import payment_service, settings_service
+    amount, booking_id = 0.0, ""
+    currency = (getattr(payment_service.settings, "stripe_currency", "eur") or "eur").upper()
+    stripe = payment_service._client()
+    if stripe and session_id:
+        try:
+            s = stripe.checkout.Session.retrieve(session_id)
+            amount = (s.amount_total or 0) / 100.0
+            booking_id = (s.metadata or {}).get("booking_id", "")
+        except Exception:
+            pass
+    # Google Ads conversion tag fires only if the owner has configured the IDs
+    ads_id = settings_service.get(db, "google_ads_id", "") or ""
+    ads_label = settings_service.get(db, "google_ads_label", "") or ""
     return _result_page(
         "Plaćanje uspješno!",
         "Hvala! Vaš depozit je primljen i rezervacija je potvrđena. "
         "Potvrdu ćete dobiti na email. Vidimo se! / Payment received — your "
         "booking is confirmed. A confirmation is on its way to your email.",
-        ok=True)
+        ok=True,
+        conversion={"amount": amount, "currency": currency, "booking_id": booking_id,
+                    "ads_id": ads_id, "ads_label": ads_label})
 
 
 @widget_router.get("/pay/cancel")
