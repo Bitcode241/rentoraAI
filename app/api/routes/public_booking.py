@@ -480,16 +480,29 @@ h1{{font-size:22px;margin:0 0 8px}}p{{color:#6a7e8c;line-height:1.5;margin:0}}
 @widget_router.get("/pay/success")
 def pay_success(session_id: str = "", db: Session = Depends(get_db)):
     from app.services import payment_service, settings_service
-    amount, booking_id = 0.0, ""
+    amount, booking_id, paid = 0.0, "", False
     currency = (getattr(payment_service.settings, "stripe_currency", "eur") or "eur").upper()
     stripe = payment_service._client()
     if stripe and session_id:
         try:
             s = stripe.checkout.Session.retrieve(session_id)
-            amount = (s.amount_total or 0) / 100.0
-            booking_id = (s.metadata or {}).get("booking_id", "")
+            # SECURITY: only treat as success if Stripe confirms the payment.
+            # Otherwise anyone opening /pay/success?session_id=... could fake a
+            # "paid" page and fire a bogus Google Ads conversion.
+            if getattr(s, "payment_status", "") == "paid":
+                paid = True
+                amount = (s.amount_total or 0) / 100.0
+                booking_id = (s.metadata or {}).get("booking_id", "")
         except Exception:
             pass
+    # Not confirmed paid -> show a neutral "not confirmed" page, NO conversion tag
+    if not paid:
+        return _result_page(
+            "Plaćanje nije potvrđeno",
+            "Nismo uspjeli potvrditi vaše plaćanje. Ako ste platili, javite nam se "
+            "i provjerite email. / We couldn't confirm your payment yet. If you "
+            "paid, please check your email or contact us.",
+            ok=False)
     # Google Ads conversion tag fires only if the owner has configured the IDs
     ads_id = settings_service.get(db, "google_ads_id", "") or ""
     ads_label = settings_service.get(db, "google_ads_label", "") or ""

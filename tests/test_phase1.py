@@ -206,11 +206,15 @@ def test_payment_config_endpoint(client, auth):
 
 
 def test_pay_success_page(client):
+    # Without a valid paid Stripe session, the page must NOT claim success and must
+    # NOT fire a conversion — it shows a neutral "not confirmed" page.
     r = client.get("/pay/success")
     assert r.status_code == 200
-    # bilingual confirmation page; check for stable markers
     low = r.text.lower()
-    assert "rentoraai" in low and ("confirmed" in low or "potvrđena" in low)
+    assert "rentoraai" in low
+    # no session -> not confirmed, and no Google Ads conversion tag
+    assert ("nije potvrđeno" in low or "couldn't confirm" in low)
+    assert "aw-" not in low  # conversion tag must not fire without a paid session
 
 
 def test_checkout_requires_stripe(client, auth):
@@ -1957,4 +1961,43 @@ def test_attribution_stored_and_reported(monkeypatch):
     assert google["source"] == "Google Ads"  # friendly label
     # empty source -> Direct label
     assert attribution_service._label("") == "Direct / bez izvora"
+    db.close()
+
+
+def test_pay_success_requires_real_payment(monkeypatch):
+    """Success page + conversion only when Stripe confirms payment_status == paid."""
+    from app.core.database import SessionLocal
+    from app.api.routes import public_booking as pb
+    from app.services import settings_service
+    import app.services.payment_service as ps
+    db = SessionLocal()
+    settings_service.set(db, "google_ads_id", "AW-18318561249")
+    settings_service.set(db, "google_ads_label", "TESTLABEL")
+    db.commit()
+
+    class _Sess:
+        def __init__(self, status):
+            self.status = status
+        def retrieve(self, sid):
+            o = type("X", (), {})()
+            o.payment_status = self.status
+            o.amount_total = 9000
+            o.metadata = {"booking_id": "42"}
+            return o
+
+    def _mk(status):
+        fs = type("FS", (), {})()
+        fs.checkout = type("C", (), {"Session": _Sess(status)})()
+        return fs
+
+    # paid -> success + conversion
+    monkeypatch.setattr(ps, "_client", lambda: _mk("paid"))
+    body = pb.pay_success(session_id="cs_ok", db=db).body.decode()
+    assert "uspješno" in body and "AW-18318561249" in body
+
+    # unpaid (someone opened the URL) -> not confirmed, NO conversion
+    monkeypatch.setattr(ps, "_client", lambda: _mk("unpaid"))
+    body2 = pb.pay_success(session_id="cs_fake", db=db).body.decode()
+    assert "nije potvrđeno" in body2
+    assert "AW-18318561249" not in body2
     db.close()
