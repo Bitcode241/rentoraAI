@@ -8,16 +8,18 @@ from app.models.booking import Booking
 def _label(source: str) -> str:
     """Human-friendly label for a raw utm_source (or 'Direct' when empty)."""
     s = (source or "").strip().lower()
-    if not s:
+    # generic/non-informative sources are treated as direct
+    if s in ("", "web", "website", "direct", "referral", "(none)", "none"):
         return "Direct / bez izvora"
     mapping = {
         "google": "Google Ads", "google_ads": "Google Ads", "googleads": "Google Ads",
-        "adwords": "Google Ads",
+        "adwords": "Google Ads", "cpc": "Google Ads", "google-ads": "Google Ads",
         "whatsapp": "WhatsApp", "wa": "WhatsApp",
         "instagram": "Instagram", "ig": "Instagram",
-        "facebook": "Facebook", "fb": "Facebook",
+        "facebook": "Facebook", "fb": "Facebook", "meta": "Facebook",
         "getyourguide": "GetYourGuide", "viator": "Viator",
         "tripadvisor": "TripAdvisor", "booking": "Booking.com",
+        "email": "Email", "newsletter": "Email",
     }
     return mapping.get(s, source)
 
@@ -31,10 +33,13 @@ def source_report(db: Session, only_paid: bool = True) -> list:
     rows = q.all()
     buckets = {}
     for b in rows:
-        key = (b.utm_source or "").strip().lower()
+        # group by the friendly label so "", "web", "referral" merge into one
+        # "Direct" row instead of showing as separate confusing rows
+        label = _label(b.utm_source)
+        key = label.lower()
         if key not in buckets:
             buckets[key] = {
-                "source": _label(b.utm_source),
+                "source": label,
                 "raw_source": b.utm_source or "",
                 "bookings": 0, "revenue": 0.0, "deposits": 0.0,
                 "campaigns": set(),

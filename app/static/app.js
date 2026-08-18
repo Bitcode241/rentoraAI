@@ -510,19 +510,45 @@ function tourEmbed(id, name, atype){
   const base = location.origin;
   const url = `${base}/book/${atype}?tour=${id}`;
   const iframe = `<iframe src="${url}" style="width:100%;height:900px;border:0" title="${name}"></iframe>`;
+  // Smart embed: forwards gclid + utm_* from the parent page URL into the iframe,
+  // so Google Ads / campaign source reaches the booking. Paste this whole block.
+  const smart =
+`<div id="rentora-book"></div>
+<script>
+(function(){
+  var base = "${url}";
+  var keep = ["gclid","utm_source","utm_medium","utm_campaign","utm_term"];
+  var parent = new URLSearchParams(location.search);
+  var extra = [];
+  keep.forEach(function(k){ var v = parent.get(k); if(v) extra.push(k+"="+encodeURIComponent(v)); });
+  var src = base + (extra.length ? (base.indexOf("?")>-1?"&":"?") + extra.join("&") : "");
+  var f = document.createElement("iframe");
+  f.src = src; f.title = ${JSON.stringify(name)};
+  f.style.cssText = "width:100%;height:900px;border:0";
+  document.getElementById("rentora-book").appendChild(f);
+})();
+</script>`;
   openModal(`
     <h3 style="margin-top:0">Ugradnja — ${name}</h3>
-    <p style="color:var(--mut);font-size:13px">Ovaj kod prikazuje <b>samo ovu turu</b>. Zalijepi ga na stranicu te ture na svom sajtu — gost vidi isključivo "${name}".</p>
+    <p style="color:var(--mut);font-size:13px">Prikazuje <b>samo ovu turu</b>. Zalijepi na stranicu te ture na svom sajtu.</p>
+    <div style="background:var(--good-bg,#e8f5ee);border:1px solid var(--good,#1a8a5a);border-radius:8px;padding:8px 10px;font-size:12px;margin-bottom:12px">
+      <b>Preporučeno:</b> "Pametni kod" ispod prenosi <b>Google Ads (gclid)</b> i izvore s tvoje stranice u rezervaciju. Bez njega se izvor ne vidi u Izvorima.</div>
+    <label style="font-size:12px;color:var(--mut)"><b>Pametni kod</b> (prenosi Google Ads izvor — koristi OVO)</label>
+    <div style="display:flex;gap:6px;margin:4px 0 14px">
+      <textarea readonly id="te_smart" style="flex:1;font-size:11px;background:var(--bg);height:150px;resize:none">${smart.replace(/</g,'&lt;')}</textarea>
+      <button class="btn btn-sm" onclick="copyVal('te_smart')">Kopiraj</button>
+    </div>
     <label style="font-size:12px;color:var(--mut)">Direktni link (za dugme ili menu)</label>
     <div style="display:flex;gap:6px;margin:4px 0 14px">
       <input readonly value="${url}" id="te_link" style="flex:1;font-size:13px;background:var(--bg)">
       <button class="btn btn-sm" onclick="copyVal('te_link')">Kopiraj</button>
     </div>
-    <label style="font-size:12px;color:var(--mut)">iframe kod (zalijepi u HTML stranice)</label>
-    <div style="display:flex;gap:6px;margin:4px 0 0">
-      <textarea readonly id="te_emb" style="flex:1;font-size:12px;background:var(--bg);height:70px;resize:none">${iframe.replace(/</g,'&lt;')}</textarea>
-      <button class="btn btn-sm" onclick="copyVal('te_emb')">Kopiraj</button>
-    </div>
+    <details style="margin-top:4px"><summary style="font-size:12px;color:var(--mut);cursor:pointer">Obični iframe (bez praćenja izvora)</summary>
+      <div style="display:flex;gap:6px;margin:8px 0 0">
+        <textarea readonly id="te_emb" style="flex:1;font-size:12px;background:var(--bg);height:60px;resize:none">${iframe.replace(/</g,'&lt;')}</textarea>
+        <button class="btn btn-sm" onclick="copyVal('te_emb')">Kopiraj</button>
+      </div>
+    </details>
     <div style="font-size:11px;color:var(--mut);margin-top:8px">Jezik: dodaj <code>&amp;lang=en</code> ili <code>&amp;lang=de</code> na link za fiksni jezik.</div>
     <div style="margin-top:16px"><button class="btn btn-ghost" onclick="closeModal()">Zatvori</button></div>`);
 }

@@ -2001,3 +2001,32 @@ def test_pay_success_requires_real_payment(monkeypatch):
     assert "nije potvrđeno" in body2
     assert "AW-18318561249" not in body2
     db.close()
+
+
+def test_generic_sources_merge_into_direct():
+    """Empty, 'web', and 'referral' sources all merge into one 'Direct' row."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.models.booking import Booking
+    from app.services import attribution_service
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    jet = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    c = Customer(full_name="T", email="merge@x.com")
+    db.add(c); db.commit(); db.refresh(c)
+    now = datetime.now(timezone.utc)
+    for i, src in enumerate(["", "web", "referral", "google"]):
+        db.add(Booking(asset_id=jet.id, customer_id=c.id,
+                       start_datetime=now + timedelta(days=i + 1),
+                       end_datetime=now + timedelta(days=i + 1, hours=1),
+                       total_price=150, amount_paid=45, payment_status="deposit_paid",
+                       passengers=1, package_name="1h", utm_source=src))
+    db.commit()
+    rep = attribution_service.source_report(db)
+    direct = [r for r in rep if r["source"] == "Direct / bez izvora"]
+    assert len(direct) == 1  # "", web, referral all merge into ONE row
+    assert direct[0]["bookings"] >= 3  # at least our three generic-source bookings
+    google = [r for r in rep if r["source"] == "Google Ads"]
+    assert len(google) == 1  # google stays its own row
+    db.close()
