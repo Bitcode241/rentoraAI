@@ -2214,3 +2214,39 @@ def test_deposit_link_emails_guest(monkeypatch):
     assert sent["to"] == "mail@example.com"
     assert "checkout.stripe.com" in sent["body"]
     db.close()
+
+
+def test_push_subscribe_and_key(client, auth):
+    """Owner can register a device for booking notifications."""
+    r = client.get("/api/push/key", headers=auth)
+    assert r.status_code == 200
+    key = r.json()["key"]
+    assert len(key) > 80  # a real VAPID public key
+    # same key on a second call (stable, not regenerated)
+    assert client.get("/api/push/key", headers=auth).json()["key"] == key
+    sub = {"endpoint": "https://fcm.googleapis.com/fcm/send/TESTABC",
+           "keys": {"p256dh": "BKxQ", "auth": "abc"}}
+    r2 = client.post("/api/push/subscribe", headers=auth,
+                     json={"subscription": sub, "label": "iPhone"})
+    assert r2.json()["ok"] is True
+    devices = client.get("/api/push/devices", headers=auth).json()["devices"]
+    assert any(d["label"] == "iPhone" for d in devices)
+    # re-subscribing the same endpoint doesn't duplicate it
+    client.post("/api/push/subscribe", headers=auth,
+                json={"subscription": sub, "label": "iPhone"})
+    d2 = client.get("/api/push/devices", headers=auth).json()["devices"]
+    assert len([d for d in d2 if d["label"] == "iPhone"]) == 1
+    # unsubscribe removes it
+    client.post("/api/push/unsubscribe", headers=auth,
+                json={"endpoint": sub["endpoint"]})
+    d3 = client.get("/api/push/devices", headers=auth).json()["devices"]
+    assert not any(d["label"] == "iPhone" for d in d3)
+
+
+def test_pay_tag_recognises_fully_paid():
+    """Regression: 'paid' must not display as 'Neplaćeno' in the admin."""
+    import re
+    js = open("app/static/app.js", encoding="utf-8").read()
+    m = re.search(r"function payTag\(ps\)\{(.*?)\n\}", js, re.S)
+    assert m, "payTag not found"
+    assert "paid:[" in m.group(1).replace(" ", "")  # a 'paid' entry exists

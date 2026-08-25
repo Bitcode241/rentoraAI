@@ -202,19 +202,15 @@ def _send_voucher(db, booking, group=None):
 
 
 def _notify_owner_paid(db, booking, group=None):
-    """Email the business owner that a guest paid the deposit."""
+    """Tell the owner a guest paid: email (if mail is set up) AND a phone push."""
     from app.integrations.email_imap import MultiMailboxManager
+    from app.core.timeutil import fmt_local
+    import re as _re
     asset = db.get(Asset, booking.asset_id)
     cust = db.get(Customer, booking.customer_id)
-    mgr = MultiMailboxManager.from_db(db)
-    if not mgr.enabled:
-        return
-    box = next(iter(mgr.services.keys()), "")
-    from app.core.timeutil import fmt_local
     when = fmt_local(booking.start_datetime)
     group = group or [booking]
     qty = len(group)
-    import re as _re
     base_name = _re.sub(r"\s*\(\d+\)\s*$", "", asset.name).strip() if asset else "—"
     asset_label = f"{qty}× {base_name}" if qty > 1 else (asset.name if asset else "—")
     g_paid = sum(b.amount_paid or 0 for b in group)
@@ -223,8 +219,27 @@ def _notify_owner_paid(db, booking, group=None):
     pax = sum(getattr(b, "passengers", 0) or 0 for b in group)
     src = getattr(booking, "utm_source", "") or booking.source or ""
     pickup = getattr(booking, "pickup_location", "") or ""
+    guest_name = (cust.full_name if cust else "") or "Gost"
+
+    # 1) push to the phone first — this is the one that must not be missed
+    try:
+        from app.services import push_service
+        push_service.send_to_all(
+            db,
+            f"Nova rezervacija — {g_paid:.0f}€ plaćeno",
+            f"{guest_name} · {asset_label} · {when}"
+            + (f" · naplatiti {g_balance:.0f}€" if g_balance else ""),
+            url="/admin")
+    except Exception as e:  # pragma: no cover
+        log.warning("push_notify_failed", booking_id=booking.id, error=str(e))
+
+    # 2) email (only if a mailbox is configured)
+    mgr = MultiMailboxManager.from_db(db)
+    if not mgr.enabled:
+        return
+    box = next(iter(mgr.services.keys()), "")
     body = (f"NOVA REZERVACIJA — depozit plaćen\n\n"
-            f"Gost: {cust.full_name if cust else ''}\n"
+            f"Gost: {guest_name}\n"
             f"Telefon: {(cust.phone if cust else '') or '—'}\n"
             f"Email: {(cust.email if cust else '') or '—'}\n\n"
             f"Plovilo: {asset_label}\n"
@@ -236,9 +251,7 @@ def _notify_owner_paid(db, booking, group=None):
             f"Ukupno: {g_total:.2f} EUR\n\n"
             f"{('Izvor: ' + src + chr(10)) if src else ''}"
             f"Rezervacija #{booking.id} — POTVRĐENA")
-    mgr.reply_from(box, box,
-                   f"[NOVA] {cust.full_name if cust else 'Gost'} — {asset_label} — {when}",
-                   body)
+    mgr.reply_from(box, box, f"[NOVA] {guest_name} — {asset_label} — {when}", body)
 
 
 def _send_confirmation(db, booking, group=None):

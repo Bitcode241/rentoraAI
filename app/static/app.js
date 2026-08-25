@@ -285,8 +285,8 @@ const RENDER = {
   },
   'Bookings': async (v)=>{
     const b = await api('/api/bookings');
-    v.innerHTML = `<div class="toolbar"><button class="btn btn-sm" onclick="bookingModal()">+ New booking</button></div>
-      <div class="panel panel-scroll">${bookingTable(b,true)}</div>`;
+    v.innerHTML = `<div class="toolbar"><button class="btn btn-sm" onclick="bookingModal()">+ Nova rezervacija</button></div>
+      ${bookingTable(b,true)}`;
   },
   'Settings': async (v)=>{
     const [lt, biz] = await Promise.all([api('/api/settings/lead-times'), api('/api/settings/business')]);
@@ -321,6 +321,16 @@ const RENDER = {
         <button class="btn btn-sm btn-ghost" onclick="addMeetingPoint()">+ Dodaj lokaciju</button>
       </div>
       <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line)">
+        <div style="font-weight:700;font-size:14px;margin-bottom:4px">Obavijesti na telefon</div>
+        <div style="font-size:12px;color:var(--mut);margin-bottom:10px">Kad gost plati, odmah ti iskoči obavijest na telefonu — kao poruka, ne možeš je preskočiti. Uključi na svakom uređaju posebno.<br><b>iPhone:</b> prvo dodaj app na početni zaslon (Share → Add to Home Screen), pa uključi ovdje.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          <button class="btn btn-sm" onclick="enablePush()">Uključi obavijesti na ovom uređaju</button>
+          <button class="btn btn-sm btn-ghost" onclick="testPush()">Pošalji test</button>
+        </div>
+        <div id="push_devices" style="margin-bottom:6px"></div>
+        <div id="push_msg" style="font-size:13px"></div>
+      </div>
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line)">
         <div style="font-weight:700;font-size:14px;margin-bottom:4px">Google Ads praćenje konverzija</div>
         <div style="font-size:12px;color:var(--mut);margin-bottom:10px">Kad plaćanje uspije, javlja se Google Adsu. Upiši iz svog Google Ads računa (Tools → Conversions). Ostavi prazno ako ne koristiš Ads.</div>
         <label>Conversion ID (npr. AW-1234567890)</label>
@@ -340,6 +350,7 @@ const RENDER = {
     </div>`;
     MP = Array.isArray(biz.meeting_points) ? biz.meeting_points.slice() : [];
     renderMeetingPoints();
+    loadPushDevices();
   },
   'Customers': async (v)=>{
     const c = await api('/api/customers');
@@ -394,10 +405,10 @@ const RENDER = {
       <td>${u.bookings}</td><td>${money(u.revenue)}</td></tr>`).join('')}</tbody></table></div>`;
   },
   'Upcoming Reservations': async (v)=>{
-    const b = await api('/api/reports/upcoming'); v.innerHTML = `<div class="panel">${bookingTable(b,true)}</div>`;
+    const b = await api('/api/reports/upcoming'); v.innerHTML = bookingTable(b,true);
   },
   "Today's Reservations": async (v)=>{
-    const b = await api('/api/reports/today'); v.innerHTML = `<div class="panel">${bookingTable(b,true)}</div>`;
+    const b = await api('/api/reports/today'); v.innerHTML = bookingTable(b,true);
   },
   'Recent Conversations': async (v)=>{
     const c = await api('/api/customers');
@@ -454,42 +465,68 @@ function renderTour(t){
   </div>`;
 }
 function bookingTable(b, full){
-  if(!b||!b.length) return '<div class="empty">No reservations</div>';
-  return `<table><thead><tr><th>#</th><th>Gost</th><th>Kontakt</th><th>Plovilo</th><th>Tura</th>
-    <th>Polazak</th><th>Osoba</th><th>Ukupno</th><th>Plaćeno</th><th>Status</th><th>Izvor</th>${full?'<th></th>':''}</tr></thead><tbody>
-    ${b.map(x=>{
-      const nm = (x.guest_name||'').trim();
-      const em = (x.guest_email||'').trim();
-      const ph = (x.guest_phone||'').trim();
-      const guest = nm
-        ? `<b style="cursor:pointer;text-decoration:underline dotted" onclick="openDetail(${x.id})">${nm}</b>`
-        : `<span style="color:var(--mut);cursor:pointer;text-decoration:underline dotted" onclick="openDetail(${x.id})">bez imena</span>`;
-      const contact = [
-        em ? `<a href="mailto:${em}" style="color:inherit">${em}</a>` : '',
-        ph ? `<a href="tel:${ph}" style="color:inherit">${ph}</a>` : ''
-      ].filter(Boolean).join('<br>') || '<span style="color:var(--mut)">—</span>';
-      const src = (x.utm_source||x.source||'').trim();
-      return `<tr>
-      <td class="mono" data-l="#">${x.id}</td>
-      <td data-l="Gost">${guest}</td>
-      <td data-l="Kontakt" style="font-size:12px;line-height:1.5">${contact}</td>
-      <td data-l="Plovilo">${x.asset_name||('#'+x.asset_id)}</td>
-      <td data-l="Tura">${x.package_name||'—'}</td>
-      <td data-l="Polazak" style="white-space:nowrap">${fmt(x.start_datetime)}</td>
-      <td data-l="Osoba" style="text-align:center">${x.passengers||'—'}</td>
-      <td data-l="Ukupno">${money(x.total_price)}</td>
-      <td data-l="Plaćeno">${x.amount_paid?money(x.amount_paid):'—'}</td>
-      <td data-l="Status">${statusTag(x.status)}<br>${payTag(x.payment_status)}</td>
-      <td data-l="Izvor"><span class="pill">${src||'—'}</span></td>
-      ${full?`<td class="row-actions">${x.status==='pending'?`<button class="btn btn-sm" onclick="confirmB(${x.id})">Confirm</button>`:''}
-      ${(x.payment_status!=='deposit_paid')?`<button class="btn btn-sm" onclick="chargeDeposit(${x.id})">Naplati depozit</button>`:''}
-      ${(x.payment_status!=='deposit_paid')?`<button class="btn btn-sm btn-ghost" onclick="editDeposit(${x.id},${x.deposit_amount||0})">Uredi depozit</button>`:''}
-      ${(x.payment_status==='deposit_paid')?`<button class="btn btn-sm btn-ghost" onclick="sendConfirm(${x.id})">Pošalji potvrdu</button>`:''}
-      ${(x.payment_status==='deposit_paid')?`<button class="btn btn-sm btn-ghost" onclick="refundB(${x.id})">Povrat</button>`:''}
-      <button class="btn btn-sm btn-ghost" onclick="openVoucher(${x.id})">Voucher</button>
-      ${x.status!=='cancelled'&&x.status!=='completed'?`<button class="btn btn-sm btn-ghost" onclick="cancelB(${x.id})">Cancel</button>`:''}</td>`:''}</tr>`;
-    }).join('')}
-    </tbody></table>`;
+  if(!b||!b.length) return '<div class="empty">Nema rezervacija</div>';
+  return `<div class="bk-list">${b.map(x=>{
+    const nm=(x.guest_name||'').trim(), em=(x.guest_email||'').trim(), ph=(x.guest_phone||'').trim();
+    const total=x.total_price||0, paid=x.amount_paid||0;
+    const bal=Math.max(total-paid,0);
+    const src=(x.utm_source||x.source||'').trim();
+    const wa=ph.replace(/[^0-9]/g,'');
+    return `<article class="bk" onclick="openDetail(${x.id})">
+      <header class="bk-top">
+        <div class="bk-who">
+          <div class="bk-name">${nm||'Gost bez imena'}</div>
+          <div class="bk-sub">${x.asset_name||('#'+x.asset_id)} · ${x.package_name||'—'}</div>
+        </div>
+        <div class="bk-when">
+          <div class="bk-date">${fmtDay(x.start_datetime)}</div>
+          <div class="bk-time">${fmtTime(x.start_datetime)}</div>
+        </div>
+      </header>
+
+      <div class="bk-money">
+        <div class="bk-m"><span>Ukupno</span><b>${money(total)}</b></div>
+        <div class="bk-m"><span>Plaćeno</span><b>${money(paid)}</b></div>
+        <div class="bk-m ${bal>0?'due':'ok'}"><span>${bal>0?'Za naplatiti':'Podmireno'}</span><b>${bal>0?money(bal):'✓'}</b></div>
+      </div>
+
+      <footer class="bk-foot">
+        <div class="bk-tags">
+          ${statusTag(x.status)} ${payTag(x.payment_status)}
+          ${x.passengers?`<span class="pill">${x.passengers} os.</span>`:''}
+          ${src?`<span class="pill">${src}</span>`:''}
+        </div>
+        ${full?`<div class="bk-acts" onclick="event.stopPropagation()">
+          ${wa?`<a class="ic" title="WhatsApp" target="_blank" href="https://wa.me/${wa}">✆</a>`:''}
+          ${em?`<a class="ic" title="Email" href="mailto:${em}">✉</a>`:''}
+          <button class="ic" title="Više" onclick="bkMenu(${x.id},'${x.payment_status}','${x.status}',${x.deposit_amount||0})">⋯</button>
+        </div>`:''}
+      </footer>
+    </article>`;
+  }).join('')}</div>`;
+}
+
+function fmtDay(dt){ if(!dt) return '—'; return new Date(dt).toLocaleDateString('hr-HR',
+  {timeZone:'Europe/Zagreb',day:'numeric',month:'short'}); }
+function fmtTime(dt){ if(!dt) return ''; return new Date(dt).toLocaleTimeString('hr-HR',
+  {timeZone:'Europe/Zagreb',hour:'2-digit',minute:'2-digit'}); }
+
+function bkMenu(id, pay, status, dep){
+  const act=[];
+  if(status==='pending') act.push(`<button class="btn btn-sm" onclick="closeModal();confirmB(${id})">Potvrdi rezervaciju</button>`);
+  if(pay!=='deposit_paid'){
+    act.push(`<button class="btn btn-sm" onclick="closeModal();chargeDeposit(${id})">Pošalji link za plaćanje</button>`);
+    act.push(`<button class="btn btn-sm btn-ghost" onclick="closeModal();editDeposit(${id},${dep})">Uredi depozit</button>`);
+  } else {
+    act.push(`<button class="btn btn-sm btn-ghost" onclick="closeModal();sendConfirm(${id})">Pošalji potvrdu gostu</button>`);
+    act.push(`<button class="btn btn-sm btn-ghost" onclick="closeModal();refundB(${id})">Povrat novca</button>`);
+  }
+  act.push(`<button class="btn btn-sm btn-ghost" onclick="closeModal();openVoucher(${id})">Voucher</button>`);
+  if(status!=='cancelled'&&status!=='completed')
+    act.push(`<button class="btn btn-sm btn-ghost" style="color:var(--bad)" onclick="closeModal();cancelB(${id})">Otkaži rezervaciju</button>`);
+  openModal(`<h3 style="margin-top:0">Rezervacija #${id}</h3>
+    <div style="display:flex;flex-direction:column;gap:8px">${act.join('')}</div>
+    <div style="margin-top:16px"><button class="btn btn-ghost" onclick="closeModal()">Zatvori</button></div>`);
 }
 
 // ---- modals & actions ----
@@ -1133,7 +1170,8 @@ async function testMailbox(id){
 
 function payTag(ps){
   const map={unpaid:['Neplaćeno','#999'],awaiting_payment:['Čeka uplatu','var(--warn)'],
-    deposit_paid:['Depozit plaćen','var(--good)'],refunded:['Vraćeno','var(--deep)']};
+    deposit_paid:['Depozit plaćen','var(--good)'],paid:['Plaćeno u cijelosti','var(--good)'],
+    refunded:['Vraćeno','var(--deep)']};
   const [label,color]=map[ps||'unpaid']||map.unpaid;
   return `<span style="font-size:11px;color:${color};font-weight:600">${label}</span>`;
 }
@@ -1331,6 +1369,62 @@ async function openThread(id){
       <div class="convo" style="max-height:420px;overflow:auto">${body}</div>
       <div style="margin-top:16px"><button class="btn btn-ghost" onclick="closeModal()">Zatvori</button></div>`);
   }catch(e){ alert(e.message||'Greška'); }
+}
+
+// ---- push notifications (booking alerts on the phone) ----
+function pushSupported(){
+  return ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window);
+}
+function _urlB64ToUint8(base64){
+  const pad='='.repeat((4-base64.length%4)%4);
+  const b64=(base64+pad).replace(/-/g,'+').replace(/_/g,'/');
+  const raw=atob(b64); const arr=new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++) arr[i]=raw.charCodeAt(i);
+  return arr;
+}
+async function enablePush(){
+  const msg=document.getElementById('push_msg');
+  const say=(t,bad)=>{ if(msg){ msg.textContent=t; msg.style.color=bad?'var(--bad)':'var(--good)'; } };
+  if(!pushSupported()){ say('Ovaj preglednik ne podržava obavijesti. Na iPhoneu prvo dodaj app na početni zaslon.',true); return; }
+  try{
+    const perm=await Notification.requestPermission();
+    if(perm!=='granted'){ say('Obavijesti nisu dopuštene — uključi ih u postavkama preglednika.',true); return; }
+    const reg=await navigator.serviceWorker.register('/static/sw.js');
+    await navigator.serviceWorker.ready;
+    const {key}=await api('/api/push/key');
+    let sub=await reg.pushManager.getSubscription();
+    if(!sub){
+      sub=await reg.pushManager.subscribe({
+        userVisibleOnly:true,
+        applicationServerKey:_urlB64ToUint8(key)
+      });
+    }
+    const label=/iPhone|iPad/i.test(navigator.userAgent)?'iPhone':
+                /Android/i.test(navigator.userAgent)?'Android':'Računalo';
+    await api('/api/push/subscribe',{method:'POST',
+      body:JSON.stringify({subscription:sub.toJSON(),label})});
+    say('Obavijesti uključene na ovom uređaju ✓');
+    loadPushDevices();
+  }catch(e){ say('Greška: '+(e.message||e),true); }
+}
+async function testPush(){
+  const msg=document.getElementById('push_msg');
+  try{
+    const r=await api('/api/push/test',{method:'POST'});
+    if(msg){ msg.style.color=r.sent?'var(--good)':'var(--bad)';
+      msg.textContent=r.sent?`Poslano na ${r.sent} uređaj(a) — provjeri telefon`
+        :'Nema registriranih uređaja. Prvo uključi obavijesti.'; }
+  }catch(e){ if(msg){ msg.style.color='var(--bad)'; msg.textContent=e.message; } }
+}
+async function loadPushDevices(){
+  const box=document.getElementById('push_devices');
+  if(!box) return;
+  try{
+    const r=await api('/api/push/devices');
+    box.innerHTML=(r.devices||[]).length
+      ? r.devices.map(d=>`<span class="pill">${d.label}</span>`).join(' ')
+      : '<span style="color:var(--mut);font-size:12px">Nema uređaja s uključenim obavijestima</span>';
+  }catch(e){}
 }
 
 async function saveBusiness(){
