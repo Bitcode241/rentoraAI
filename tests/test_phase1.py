@@ -2128,3 +2128,41 @@ def test_booking_detail_shows_balance_and_extras(client, auth):
     assert any("GoPro" in x for x in d["extras"])
     assert any("Dodatna osoba" in x for x in d["extras"])
     assert d["source"]["utm_source"] == "google"
+
+
+def test_checkout_returns_guest_info_for_sending(client, auth, monkeypatch):
+    """Deposit link endpoint returns guest contact + amount so admin can send it."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.models.booking import Booking
+    import app.services.payment_service as ps
+    from datetime import datetime, timezone, timedelta
+    monkeypatch.setattr(ps, "create_deposit_checkout",
+                        lambda b, name, guest_email="", override_amount=None,
+                        group_booking_ids=None, attribution=None:
+                        {"url": "https://checkout.stripe.com/c/pay/cs_x",
+                         "session_id": "cs_x"})
+    db = SessionLocal()
+    jet = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    c = Customer(full_name="Szymon Naton", email="szy@example.com",
+                 phone="+48501234567")
+    db.add(c); db.commit(); db.refresh(c)
+    now = datetime.now(timezone.utc)
+    b = Booking(asset_id=jet.id, customer_id=c.id,
+                start_datetime=now + timedelta(days=3),
+                end_datetime=now + timedelta(days=3, hours=1),
+                total_price=250, amount_paid=0, deposit_amount=84,
+                payment_status="unpaid", status="pending", passengers=2,
+                package_name="Safari 120")
+    db.add(b); db.commit()
+    bid = b.id
+    db.close()
+    r = client.post(f"/api/payments/checkout/{bid}", headers=auth)
+    assert r.status_code == 200
+    d = r.json()
+    assert d["url"].startswith("https://checkout.stripe.com")
+    assert d["guest_email"] == "szy@example.com"
+    assert d["guest_phone"] == "+48501234567"
+    assert d["amount"] == 84
+    assert d["emailed"] is False  # not emailed unless asked

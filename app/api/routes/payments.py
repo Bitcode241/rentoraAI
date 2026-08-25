@@ -15,9 +15,12 @@ log = get_logger(__name__)
 
 
 @router.post("/checkout/{booking_id}")
-def create_checkout(booking_id: int, db: Session = Depends(get_db),
+def create_checkout(booking_id: int, send_email: bool = False,
+                    db: Session = Depends(get_db),
                     _=Depends(get_current_user)):
-    """Create a Stripe deposit payment link for a booking (admin/AI use)."""
+    """Create a Stripe deposit payment link for a booking.
+    send_email=true also emails the link to the guest. Returns the link plus guest
+    details so the admin can send it by WhatsApp with one click."""
     b = db.get(Booking, booking_id)
     if not b:
         raise HTTPException(404, "Booking not found")
@@ -25,10 +28,40 @@ def create_checkout(booking_id: int, db: Session = Depends(get_db),
     cust = db.get(Customer, b.customer_id)
     res = payment_service.create_deposit_checkout(
         b, asset.name if asset else "Plovilo", cust.email if cust else "")
-    if "url" in res:
-        b.stripe_session_id = res["session_id"]
-        b.payment_status = "awaiting_payment"
-        db.commit()
+    if "url" not in res:
+        return res
+    b.stripe_session_id = res["session_id"]
+    b.payment_status = "awaiting_payment"
+    db.commit()
+    # guest info so the UI can offer WhatsApp / copy / email
+    res["guest_name"] = (cust.full_name or "") if cust else ""
+    res["guest_email"] = (cust.email or "") if cust else ""
+    res["guest_phone"] = (cust.phone or "") if cust else ""
+    res["amount"] = round(b.deposit_amount or 0, 2)
+    res["emailed"] = False
+    if send_email and cust and cust.email:
+        try:
+            from app.services import settings_service
+            from app.core.timeutil import fmt_local
+            from app.integrations.mail_manager import MultiMailboxManager
+            business = settings_service.business_name(db)
+            when = fmt_local(b.start_datetime)
+            subject = f"Payment link — {business}"
+            body = (f"Hi{(' ' + (cust.full_name or '')) if cust.full_name and '@' not in (cust.full_name or '') else ''},\n\n"
+                    f"Here is the secure link to pay your deposit for "
+                    f"{asset.name if asset else 'your booking'} on {when}:\n\n"
+                    f"{res['url']}\n\n"
+                    f"The booking is confirmed once the deposit is received.\n\n"
+                    f"{business}")
+            mgr = MultiMailboxManager.from_db(db)
+            if mgr.enabled:
+                from_box = next(iter(mgr.services.keys()), "")
+                mgr.reply_from(from_box, cust.email, subject, body)
+                res["emailed"] = True
+                log.info("deposit_link_emailed", booking_id=b.id, to=cust.email)
+        except Exception as e:  # pragma: no cover
+            log.warning("deposit_link_email_failed", booking_id=b.id, error=str(e))
+            res["email_error"] = str(e)
     return res
 
 

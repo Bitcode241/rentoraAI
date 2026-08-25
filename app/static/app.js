@@ -1157,16 +1157,51 @@ async function chargeDeposit(id){
   try{
     const r=await api('/api/payments/checkout/'+id,{method:'POST'});
     if(r.url){
-      // otvori Stripe stranicu za plaćanje u novom tabu
-      window.open(r.url,'_blank');
+      showPayLink(id, r);
     } else if((r.error||'')==='no_deposit'){
-      // depozit je 0 — ponudi unos pa pokušaj ponovno
-      const v=prompt('Iznos depozita je 0. Upiši iznos depozita (EUR) koji je gost platio/treba platiti:');
+      const v=prompt('Iznos depozita je 0. Upiši iznos depozita (EUR) koji gost treba platiti:');
       if(v && +v>0){ await editDeposit(id,+v,true); chargeDeposit(id); }
     } else {
       alert('Greška: '+(r.message||r.error||'nepoznato'));
     }
   }catch(e){ alert(e.message); }
+}
+
+function showPayLink(id, r){
+  const nm=(r.guest_name||'').trim(), em=(r.guest_email||'').trim();
+  const wa=(r.guest_phone||'').replace(/[^0-9]/g,'');
+  const hi = nm && nm.indexOf('@')<0 ? `Hi ${nm.split(' ')[0]}, ` : 'Hi, ';
+  const msg = `${hi}here is the secure link to pay your deposit${r.amount?` (${r.amount} EUR)`:''}: ${r.url}`;
+  openModal(`
+    <h3 style="margin-top:0">Link za plaćanje</h3>
+    <p style="color:var(--mut);font-size:13px;margin-top:0">Pošalji ovaj link gostu. Rezervacija se potvrđuje čim plaćanje prođe.</p>
+    ${r.amount?`<div style="background:var(--sand);border-radius:8px;padding:10px 12px;margin-bottom:12px">
+      <span style="font-size:12px;color:var(--mut)">Iznos depozita</span>
+      <div style="font-size:22px;font-weight:800">${money(r.amount)}</div></div>`:''}
+    <div style="display:flex;gap:6px;margin-bottom:14px">
+      <input readonly id="pl_url" value="${r.url}" style="flex:1;font-size:12px;background:var(--bg)">
+      <button class="btn btn-sm" onclick="copyVal('pl_url')">Kopiraj</button>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${wa?`<a class="btn btn-sm" target="_blank" style="text-decoration:none"
+           href="https://wa.me/${wa}?text=${encodeURIComponent(msg)}">Pošalji na WhatsApp</a>`:''}
+      ${em?`<button class="btn btn-sm btn-ghost" onclick="emailPayLink(${id})">Pošalji na email</button>`:''}
+      <a class="btn btn-sm btn-ghost" href="${r.url}" target="_blank" style="text-decoration:none">Otvori (test)</a>
+    </div>
+    ${em?`<div style="font-size:12px;color:var(--mut);margin-top:10px">Email gosta: ${em}</div>`:
+        '<div style="font-size:12px;color:var(--warn);margin-top:10px">Gost nema email — pošalji link na WhatsApp ili kopiraj.</div>'}
+    <div id="pl_msg" style="font-size:13px;color:var(--good);margin-top:8px"></div>
+    <div style="margin-top:16px"><button class="btn btn-ghost" onclick="closeModal()">Zatvori</button></div>`);
+}
+
+async function emailPayLink(id){
+  const m=document.getElementById('pl_msg'); if(m) m.textContent='Šaljem…';
+  try{
+    const r=await api('/api/payments/checkout/'+id+'?send_email=true',{method:'POST'});
+    if(m) m.textContent = r.emailed ? 'Poslano na email ✓'
+      : ('Nije poslano — provjeri Mail Settings'+(r.email_error?' ('+r.email_error+')':''));
+    if(m && !r.emailed) m.style.color='var(--bad)';
+  }catch(e){ if(m){ m.style.color='var(--bad)'; m.textContent=e.message||'Greška'; } }
 }
 
 async function editDeposit(id, current, silent){
