@@ -356,6 +356,12 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
         charge_amount = total_deposit
         label = f"{qty}× {pkg['name']} — {_re_strip(anchor.name)}" if qty > 1 else anchor.name
 
+    # DEBUG: log incoming attribution so we can verify the chain end-to-end.
+    # Remove after confirming gclid/utm arrive. Check container logs for "attribution_debug".
+    log.info("attribution_debug",
+             gclid=payload.get("gclid"), utm_source=payload.get("utm_source"),
+             utm_campaign=payload.get("utm_campaign"),
+             resolved=attribution)
     pay = payment_service.create_deposit_checkout(
         lead, label, guest_email=email, override_amount=charge_amount,
         group_booking_ids=[b.id for b in bookings],

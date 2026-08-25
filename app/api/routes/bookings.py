@@ -10,13 +10,57 @@ from app.services import booking_service
 router = APIRouter(prefix="/api/bookings", tags=["bookings"])
 
 
-@router.get("", response_model=List[BookingOut])
+@router.get("")
 def list_bookings(status: Optional[str] = None, db: Session = Depends(get_db),
                   _=Depends(get_current_user)):
+    """Bookings enriched with guest name/email/phone and asset name, so the admin
+    table shows who is coming — not just ids."""
+    from app.models.customer import Customer
+    from app.models.asset import Asset
     q = db.query(Booking)
     if status:
         q = q.filter(Booking.status == status)
-    return q.order_by(Booking.start_datetime.desc()).all()
+    rows = q.order_by(Booking.start_datetime.desc()).all()
+    # preload customers + assets in one go (avoid a query per row)
+    cust_ids = {b.customer_id for b in rows if b.customer_id}
+    asset_ids = {b.asset_id for b in rows if b.asset_id}
+    customers = {c.id: c for c in db.query(Customer).filter(
+        Customer.id.in_(cust_ids)).all()} if cust_ids else {}
+    assets = {a.id: a for a in db.query(Asset).filter(
+        Asset.id.in_(asset_ids)).all()} if asset_ids else {}
+    out = []
+    for b in rows:
+        c = customers.get(b.customer_id)
+        a = assets.get(b.asset_id)
+        name = ""
+        if c:
+            name = (c.full_name or "").strip()
+            # some records store the email as the name — show a clean blank instead
+            if name and "@" in name and name == (c.email or ""):
+                name = ""
+        out.append({
+            "id": b.id,
+            "asset_id": b.asset_id,
+            "asset_name": (a.name if a else "") or f"#{b.asset_id}",
+            "package_name": b.package_name or "",
+            "start_datetime": b.start_datetime,
+            "end_datetime": b.end_datetime,
+            "total_price": b.total_price,
+            "deposit_amount": b.deposit_amount,
+            "amount_paid": b.amount_paid,
+            "status": b.status,
+            "payment_status": b.payment_status,
+            "source": b.source,
+            "passengers": getattr(b, "passengers", 0) or 0,
+            "pickup_location": getattr(b, "pickup_location", "") or "",
+            "transfer_note": getattr(b, "transfer_note", "") or "",
+            "guest_name": name,
+            "guest_email": (c.email if c else "") or "",
+            "guest_phone": (c.phone if c else "") or "",
+            "utm_source": getattr(b, "utm_source", "") or "",
+            "utm_campaign": getattr(b, "utm_campaign", "") or "",
+        })
+    return out
 
 
 @router.post("", response_model=BookingOut)

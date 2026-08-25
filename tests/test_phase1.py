@@ -2030,3 +2030,33 @@ def test_generic_sources_merge_into_direct():
     google = [r for r in rep if r["source"] == "Google Ads"]
     assert len(google) == 1  # google stays its own row
     db.close()
+
+
+def test_bookings_list_shows_guest_details(client, auth):
+    """Admin booking list must include guest name/email/phone and asset name."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.models.booking import Booking
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    jet = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    c = Customer(full_name="Ana Testic", email="ana@example.com", phone="+385911234567")
+    db.add(c); db.commit(); db.refresh(c)
+    now = datetime.now(timezone.utc)
+    b = Booking(asset_id=jet.id, customer_id=c.id,
+                start_datetime=now + timedelta(days=2),
+                end_datetime=now + timedelta(days=2, hours=1),
+                total_price=89, amount_paid=26.7, payment_status="deposit_paid",
+                status="confirmed", passengers=2, package_name="Adriatic Rush")
+    db.add(b); db.commit()
+    bid = b.id
+    db.close()
+    r = client.get("/api/bookings", headers=auth)
+    assert r.status_code == 200
+    row = next(x for x in r.json() if x["id"] == bid)
+    assert row["guest_name"] == "Ana Testic"
+    assert row["guest_email"] == "ana@example.com"
+    assert row["guest_phone"] == "+385911234567"
+    assert row["asset_name"]  # real asset name, not just an id
+    assert row["passengers"] == 2

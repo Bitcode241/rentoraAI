@@ -73,7 +73,8 @@ async function go(page){
 function statusTag(s){ return `<span class="tag t-${s}">${s}</span>`; }
 function money(n){ return '€'+Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2}); }
 function fmt(dt){ if(!dt) return '—'; const d=new Date(dt);
-  return d.toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); }
+  // always show local (Croatian) time, regardless of the viewer's device timezone
+  return d.toLocaleString('hr-HR',{timeZone:'Europe/Zagreb',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}); }
 
 const RENDER = {
   'Dashboard': async (v)=>{
@@ -429,20 +430,38 @@ function renderTour(t){
 }
 function bookingTable(b, full){
   if(!b||!b.length) return '<div class="empty">No reservations</div>';
-  return `<table><thead><tr><th>#</th><th>Asset</th><th>Package</th><th>Start</th><th>End</th>
-    <th>Total</th><th>Status</th><th>Plaćanje</th><th>Src</th>${full?'<th></th>':''}</tr></thead><tbody>
-    ${b.map(x=>`<tr><td class="mono">${x.id}</td><td>#${x.asset_id}</td>
-    <td>${x.package_name||'—'}</td><td>${fmt(x.start_datetime)}</td>
-    <td>${fmt(x.end_datetime)}</td><td>${money(x.total_price)}</td><td>${statusTag(x.status)}</td>
-    <td>${payTag(x.payment_status)}</td>
-    <td><span class="pill">${x.source}</span></td>
-    ${full?`<td class="row-actions">${x.status==='pending'?`<button class="btn btn-sm" onclick="confirmB(${x.id})">Confirm</button>`:''}
-    ${(x.payment_status!=='deposit_paid')?`<button class="btn btn-sm" onclick="chargeDeposit(${x.id})">Naplati depozit</button>`:''}
-    ${(x.payment_status!=='deposit_paid')?`<button class="btn btn-sm btn-ghost" onclick="editDeposit(${x.id},${x.deposit_amount||0})">Uredi depozit</button>`:''}
-    ${(x.payment_status==='deposit_paid')?`<button class="btn btn-sm btn-ghost" onclick="sendConfirm(${x.id})">Pošalji potvrdu</button>`:''}
-    ${(x.payment_status==='deposit_paid')?`<button class="btn btn-sm btn-ghost" onclick="refundB(${x.id})">Povrat</button>`:''}
-    <button class="btn btn-sm btn-ghost" onclick="openVoucher(${x.id})">Voucher</button>
-    ${x.status!=='cancelled'&&x.status!=='completed'?`<button class="btn btn-sm btn-ghost" onclick="cancelB(${x.id})">Cancel</button>`:''}</td>`:''}</tr>`).join('')}
+  return `<table><thead><tr><th>#</th><th>Gost</th><th>Kontakt</th><th>Plovilo</th><th>Tura</th>
+    <th>Polazak</th><th>Osoba</th><th>Ukupno</th><th>Plaćeno</th><th>Status</th><th>Izvor</th>${full?'<th></th>':''}</tr></thead><tbody>
+    ${b.map(x=>{
+      const nm = (x.guest_name||'').trim();
+      const em = (x.guest_email||'').trim();
+      const ph = (x.guest_phone||'').trim();
+      const guest = nm ? `<b>${nm}</b>` : '<span style="color:var(--mut)">bez imena</span>';
+      const contact = [
+        em ? `<a href="mailto:${em}" style="color:inherit">${em}</a>` : '',
+        ph ? `<a href="tel:${ph}" style="color:inherit">${ph}</a>` : ''
+      ].filter(Boolean).join('<br>') || '<span style="color:var(--mut)">—</span>';
+      const src = (x.utm_source||x.source||'').trim();
+      return `<tr>
+      <td class="mono">${x.id}</td>
+      <td>${guest}</td>
+      <td style="font-size:12px;line-height:1.5">${contact}</td>
+      <td>${x.asset_name||('#'+x.asset_id)}</td>
+      <td>${x.package_name||'—'}</td>
+      <td style="white-space:nowrap">${fmt(x.start_datetime)}</td>
+      <td style="text-align:center">${x.passengers||'—'}</td>
+      <td>${money(x.total_price)}</td>
+      <td>${x.amount_paid?money(x.amount_paid):'—'}</td>
+      <td>${statusTag(x.status)}<br>${payTag(x.payment_status)}</td>
+      <td><span class="pill">${src||'—'}</span></td>
+      ${full?`<td class="row-actions">${x.status==='pending'?`<button class="btn btn-sm" onclick="confirmB(${x.id})">Confirm</button>`:''}
+      ${(x.payment_status!=='deposit_paid')?`<button class="btn btn-sm" onclick="chargeDeposit(${x.id})">Naplati depozit</button>`:''}
+      ${(x.payment_status!=='deposit_paid')?`<button class="btn btn-sm btn-ghost" onclick="editDeposit(${x.id},${x.deposit_amount||0})">Uredi depozit</button>`:''}
+      ${(x.payment_status==='deposit_paid')?`<button class="btn btn-sm btn-ghost" onclick="sendConfirm(${x.id})">Pošalji potvrdu</button>`:''}
+      ${(x.payment_status==='deposit_paid')?`<button class="btn btn-sm btn-ghost" onclick="refundB(${x.id})">Povrat</button>`:''}
+      <button class="btn btn-sm btn-ghost" onclick="openVoucher(${x.id})">Voucher</button>
+      ${x.status!=='cancelled'&&x.status!=='completed'?`<button class="btn btn-sm btn-ghost" onclick="cancelB(${x.id})">Cancel</button>`:''}</td>`:''}</tr>`;
+    }).join('')}
     </tbody></table>`;
 }
 
