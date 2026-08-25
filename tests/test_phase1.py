@@ -2250,3 +2250,26 @@ def test_pay_tag_recognises_fully_paid():
     m = re.search(r"function payTag\(ps\)\{(.*?)\n\}", js, re.S)
     assert m, "payTag not found"
     assert "paid:[" in m.group(1).replace(" ", "")  # a 'paid' entry exists
+
+
+def test_pwa_files_served(client):
+    """Manifest, service worker and icons must be reachable for the phone app."""
+    for path, ctype in [("/static/manifest.json", "json"),
+                        ("/static/sw.js", "javascript"),
+                        ("/static/icon-192.png", "image/png"),
+                        ("/static/icon-512.png", "image/png")]:
+        r = client.get(path)
+        assert r.status_code == 200, f"{path} not served"
+        assert ctype in r.headers.get("content-type", "")
+    # manifest points at the admin and is installable
+    import json
+    m = json.loads(client.get("/static/manifest.json").text)
+    assert m["start_url"] == "/admin"
+    assert m["display"] == "standalone"
+
+
+def test_login_token_persists_across_restart():
+    """Token is kept in localStorage (survives closing the app), not sessionStorage."""
+    js = open("app/static/app.js", encoding="utf-8").read()
+    assert "localStorage.setItem('tok'" in js
+    assert "sessionStorage" not in js  # would log the owner out on every exit

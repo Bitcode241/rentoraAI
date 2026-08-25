@@ -41,11 +41,11 @@ async function login(){
     if(!r.ok) throw new Error('Invalid credentials');
     const d = await r.json();
     TOKEN = d.access_token;
-    sessionStorage.setItem('tok',TOKEN);
+    localStorage.setItem('tok',TOKEN);
     boot();
   }catch(e){ document.getElementById('lerr').textContent = e.message; }
 }
-function logout(){ TOKEN=''; sessionStorage.removeItem('tok');
+function logout(){ TOKEN=''; localStorage.removeItem('tok');
   document.getElementById('shell').style.display='none';
   document.getElementById('login').style.display='flex'; }
 
@@ -1263,12 +1263,12 @@ async function editDeposit(id, current, silent){
 }
 
 // auto-login if token cached
-const cached = sessionStorage.getItem('tok');
+const cached = localStorage.getItem('tok');
 if(cached){ TOKEN=cached; boot(); }
 
 function openVoucher(id){
   // open the partner voucher PDF in a new tab (auth via token in query)
-  const t = sessionStorage.getItem('tok') || '';
+  const t = localStorage.getItem('tok') || '';
   window.open('/api/bookings/'+id+'/voucher?token='+encodeURIComponent(t), '_blank');
 }
 
@@ -1385,27 +1385,47 @@ function _urlB64ToUint8(base64){
 async function enablePush(){
   const msg=document.getElementById('push_msg');
   const say=(t,bad)=>{ if(msg){ msg.textContent=t; msg.style.color=bad?'var(--bad)':'var(--good)'; } };
-  if(!pushSupported()){ say('Ovaj preglednik ne podržava obavijesti. Na iPhoneu prvo dodaj app na početni zaslon.',true); return; }
+  if(!pushSupported()){
+    say('Ovaj preglednik ne podržava obavijesti. Na iPhoneu: dodaj app na početni zaslon i otvori je odande (ne iz Safarija).',true);
+    return;
+  }
   try{
+    say('Uključujem…');
     const perm=await Notification.requestPermission();
-    if(perm!=='granted'){ say('Obavijesti nisu dopuštene — uključi ih u postavkama preglednika.',true); return; }
+    if(perm!=='granted'){ say('Obavijesti nisu dopuštene — uključi ih u postavkama telefona za ovu app.',true); return; }
+
     const reg=await navigator.serviceWorker.register('/static/sw.js');
     await navigator.serviceWorker.ready;
     const {key}=await api('/api/push/key');
+    if(!key){ say('Server nije vratio ključ za obavijesti.',true); return; }
+
+    // an old subscription may belong to a previous key — drop it and re-subscribe
     let sub=await reg.pushManager.getSubscription();
+    if(sub){
+      const cur=new Uint8Array(sub.options.applicationServerKey||[]);
+      const want=_urlB64ToUint8(key);
+      let same = cur.length===want.length;
+      if(same){ for(let i=0;i<want.length;i++){ if(cur[i]!==want[i]){ same=false; break; } } }
+      if(!same){ try{ await sub.unsubscribe(); }catch(e){} sub=null; }
+    }
     if(!sub){
       sub=await reg.pushManager.subscribe({
         userVisibleOnly:true,
         applicationServerKey:_urlB64ToUint8(key)
       });
     }
+
     const label=/iPhone|iPad/i.test(navigator.userAgent)?'iPhone':
                 /Android/i.test(navigator.userAgent)?'Android':'Računalo';
-    await api('/api/push/subscribe',{method:'POST',
+    const res=await api('/api/push/subscribe',{method:'POST',
       body:JSON.stringify({subscription:sub.toJSON(),label})});
-    say('Obavijesti uključene na ovom uređaju ✓');
-    loadPushDevices();
-  }catch(e){ say('Greška: '+(e.message||e),true); }
+    if(!res || res.ok===false){ say('Server nije spremio uređaj'+(res&&res.error?': '+res.error:'')+'.',true); return; }
+
+    await loadPushDevices();          // refresh AFTER the save completes
+    say('Obavijesti uključene na ovom uređaju ✓ — klikni "Pošalji test".');
+  }catch(e){
+    say('Greška: '+(e.message||e)+' — na iPhoneu app mora biti otvorena s početnog zaslona.',true);
+  }
 }
 async function testPush(){
   const msg=document.getElementById('push_msg');
