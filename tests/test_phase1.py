@@ -2273,3 +2273,43 @@ def test_login_token_persists_across_restart():
     js = open("app/static/app.js", encoding="utf-8").read()
     assert "localStorage.setItem('tok'" in js
     assert "sessionStorage" not in js  # would log the owner out on every exit
+
+
+def test_detail_prefers_catalog_tour_name(client, auth):
+    """Stale package names must not confuse the owner — show the catalog tour."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.models.booking import Booking
+    from app.models.tour_type import TourType
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    jet = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    tour = db.query(TourType).filter(TourType.asset_type == "jetski").first()
+    c = Customer(full_name="Naziv Ture", email="tour@example.com")
+    db.add(c); db.commit(); db.refresh(c)
+    now = datetime.now(timezone.utc)
+    b = Booking(asset_id=jet.id, customer_id=c.id,
+                start_datetime=now + timedelta(days=1),
+                end_datetime=now + timedelta(days=1, hours=2),
+                total_price=250, amount_paid=75, payment_status="deposit_paid",
+                status="confirmed", passengers=2,
+                package_name="2h",            # stale leftover name
+                tour_type_id=tour.id)
+    db.add(b); db.commit()
+    bid = b.id
+    tour_name = tour.name
+    db.close()
+    d = client.get(f"/api/bookings/{bid}/detail", headers=auth).json()
+    # shows the canonical catalog name, not the stale "2h"
+    assert d["what"]["package_name"] == tour_name
+
+
+def test_widget_has_country_code_picker():
+    """Guests must pick a dialling code so we always get a reachable number."""
+    html = open("app/static/widget.html", encoding="utf-8").read()
+    assert 'id="g_cc"' in html                 # the picker exists
+    assert "DIAL_CODES" in html and "'+385'" in html and "'+44'" in html
+    assert "function fullPhone" in html        # combines code + number
+    assert "phone=fullPhone()" in html         # and it's what gets submitted
+    assert "errPhone" in html                  # phone is validated, not optional

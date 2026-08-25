@@ -1300,9 +1300,9 @@ async function openDetail(id){
     const d = await api('/api/bookings/'+id+'/detail');
     const g=d.guest||{}, w=d.what||{}, m=d.money||{}, s=d.source||{};
     const wa = (g.phone||'').replace(/[^0-9]/g,'');
-    const row=(k,v)=>v?`<div style="display:flex;justify-content:space-between;gap:14px;padding:7px 0;border-bottom:1px solid var(--line)">
-        <span style="color:var(--mut);font-size:12px">${k}</span>
-        <span style="font-size:13px;text-align:right">${v}</span></div>`:'';
+    const row=(k,v,long)=>v?`<div class="det-row${long?' long':''}">
+        <span class="det-k">${k}</span>
+        <span class="det-v">${v}</span></div>`:'';
     openModal(`
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
         <div><h3 style="margin:0 0 2px">${g.name||'Gost bez imena'}</h3>
@@ -1320,14 +1320,14 @@ async function openDetail(id){
           Ukupno ${money(m.total)} · već plaćeno ${money(m.paid)}</div>
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="det-grid">
         <div>
           <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--mut);margin-bottom:4px">Rezervacija</div>
           ${row('Plovilo', w.asset_name)}
           ${row('Tura', w.package_name)}
           ${row('Polazak', fmt(w.start))}
           ${row('Broj gostiju', w.passengers||'—')}
-          ${row('Lokacija', d.pickup_location||d.meeting_note||'—')}
+          ${row('Lokacija', d.pickup_location||d.meeting_note||'—', true)}
         </div>
         <div>
           <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--mut);margin-bottom:4px">Kontakt</div>

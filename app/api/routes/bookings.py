@@ -120,6 +120,14 @@ def booking_detail(booking_id: int, db: Session = Depends(get_db),
             name = ""
     # is this a partner asset (someone else's boat) — affects who collects cash
     is_partner = bool(a and getattr(a, "provider_type", "") == "partner")
+    # prefer the canonical catalog tour name — package names can be stale after renames
+    tour_name = b.package_name or ""
+    tid = getattr(b, "tour_type_id", None)
+    if tid:
+        from app.models.tour_type import TourType
+        t = db.get(TourType, tid)
+        if t and t.name:
+            tour_name = t.name
     return {
         "id": b.id,
         "status": b.status,
@@ -132,7 +140,7 @@ def booking_detail(booking_id: int, db: Session = Depends(get_db),
         "what": {
             "asset_name": (a.name if a else "") or f"#{b.asset_id}",
             "asset_type": (a.asset_type if a else "") or "",
-            "package_name": b.package_name or "",
+            "package_name": tour_name,
             "passengers": getattr(b, "passengers", 0) or 0,
             "start": b.start_datetime,
             "end": b.end_datetime,

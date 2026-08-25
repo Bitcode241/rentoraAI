@@ -194,6 +194,18 @@
     background:#fff;color:var(--teal);font-size:15px;display:grid;place-items:center;
     text-decoration:none;cursor:pointer;transition:.12s;padding:0}
   .bk-acts .ic:hover{background:var(--teal);color:#fff;border-color:var(--teal)}
+  /* ---------- Booking detail rows ---------- */
+  .det-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .det-row{display:flex;justify-content:space-between;gap:14px;padding:7px 0;
+    border-bottom:1px solid var(--line)}
+  .det-k{color:var(--mut);font-size:12px;flex-shrink:0}
+  .det-v{font-size:13px;text-align:right;min-width:0;overflow-wrap:anywhere}
+  /* long values (meeting instructions) get their own line, left aligned */
+  .det-row.long{flex-direction:column;gap:3px}
+  .det-row.long .det-v{text-align:left;line-height:1.45}
+  @media (max-width: 820px){
+    .det-grid{grid-template-columns:1fr;gap:10px}
+  }
 </style>
 </head>
 <body>

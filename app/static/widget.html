@@ -163,7 +163,11 @@
         <h2>4 · Tvoji podaci</h2>
         <label class="fl">Ime i prezime</label><input id="g_name" placeholder="Ivan Horvat">
         <label class="fl">Email</label><input id="g_email" type="email" placeholder="ivan@email.com">
-        <label class="fl">Telefon (WhatsApp/Viber)</label><input id="g_phone" placeholder="+385 …">
+        <label class="fl">Telefon (WhatsApp/Viber)</label>
+        <div style="display:flex;gap:6px">
+          <select id="g_cc" style="flex:0 0 118px"></select>
+          <input id="g_phone" style="flex:1" placeholder="91 234 5678" inputmode="tel">
+        </div>
         <div class="avail no hide" id="err" style="margin-top:12px"></div>
       </div>
     </div>
@@ -214,7 +218,7 @@ const I18N={
     checking:'Provjeravam…',free:'✓ Slobodno za odabrani termin',busy:'✗ Zauzeto — probaj drugi termin',
     noUnits:'Trenutno nema dostupnih jedinica.',noAddons:'Nema dodataka.',min:'min',
     depNow:n=>`Sada platiš depozit ${n} · ostatak na licu mjesta`,loading:'Učitavam…',
-    errEmail:'Upiši ispravan email.',errName:'Upiši ime i prezime.',preparing:'Pripremam…',
+    errEmail:'Upiši ispravan email.',errName:'Upiši ime i prezime.',errPhone:'Upiši broj telefona (za WhatsApp).',preparing:'Pripremam…',
     taken:'Termin je upravo zauzet. Odaberi drugi.',wrong:'Nešto je pošlo po zlu. Pokušaj ponovno.',
     netErr:'Greška u mreži. Pokušaj ponovno.',loadErr:'Greška pri učitavanju. Pokušaj ponovno.'},
   en:{title:'Book online',sub:'Choose, pay the deposit, done. Balance on site.',
@@ -226,7 +230,7 @@ const I18N={
     checking:'Checking…',free:'✓ Available for this time',busy:'✗ Taken — try another time',
     noUnits:'No units available right now.',noAddons:'No add-ons.',min:'min',
     depNow:n=>`Pay a ${n} deposit now · balance on site`,loading:'Loading…',
-    errEmail:'Enter a valid email.',errName:'Enter your full name.',preparing:'Preparing…',
+    errEmail:'Enter a valid email.',errName:'Enter your full name.',errPhone:'Enter your phone number (for WhatsApp).',preparing:'Preparing…',
     taken:'That slot was just taken. Pick another.',wrong:'Something went wrong. Try again.',
     netErr:'Network error. Try again.',loadErr:'Loading error. Try again.'},
   de:{title:'Online buchen',sub:'Wählen, Anzahlung zahlen, fertig. Rest vor Ort.',
@@ -238,7 +242,7 @@ const I18N={
     checking:'Prüfe…',free:'✓ Verfügbar für diese Zeit',busy:'✗ Belegt — andere Zeit wählen',
     noUnits:'Derzeit keine Einheiten verfügbar.',noAddons:'Keine Extras.',min:'Min',
     depNow:n=>`Jetzt ${n} Anzahlung · Rest vor Ort`,loading:'Lädt…',
-    errEmail:'Gültige E-Mail eingeben.',errName:'Namen eingeben.',preparing:'Bereite vor…',
+    errEmail:'Gültige E-Mail eingeben.',errName:'Namen eingeben.',errPhone:'Telefonnummer eingeben (für WhatsApp).',preparing:'Bereite vor…',
     taken:'Termin gerade vergeben. Anderen wählen.',wrong:'Etwas ging schief. Erneut versuchen.',
     netErr:'Netzwerkfehler. Erneut versuchen.',loadErr:'Ladefehler. Erneut versuchen.'},
 };
@@ -246,6 +250,36 @@ const T=I18N[LANG];
 let CFG={}, ASSETS=[], ADDONS=[], S={asset:null,pkg:null,pax:1,qty:1,addons:new Set(),step:1,avail:null,free:0,transfer:null};
 
 const money=n=>new Intl.NumberFormat(LANG+'-'+(LANG==='en'?'GB':LANG.toUpperCase()),{style:'currency',currency:CFG.currency||'EUR',maximumFractionDigits:0}).format(n||0);
+
+// Country dialling codes — the guest picks one so we always end up with a number
+// we can actually call or WhatsApp (a bare "091 234 567" is unusable).
+const DIAL_CODES = [
+  ['+385','🇭🇷 HR'],['+44','🇬🇧 UK'],['+49','🇩🇪 DE'],['+43','🇦🇹 AT'],
+  ['+1','🇺🇸 US/CA'],['+33','🇫🇷 FR'],['+39','🇮🇹 IT'],['+34','🇪🇸 ES'],
+  ['+31','🇳🇱 NL'],['+32','🇧🇪 BE'],['+41','🇨🇭 CH'],['+48','🇵🇱 PL'],
+  ['+420','🇨🇿 CZ'],['+421','🇸🇰 SK'],['+36','🇭🇺 HU'],['+386','🇸🇮 SI'],
+  ['+387','🇧🇦 BA'],['+381','🇷🇸 RS'],['+382','🇲🇪 ME'],['+353','🇮🇪 IE'],
+  ['+45','🇩🇰 DK'],['+46','🇸🇪 SE'],['+47','🇳🇴 NO'],['+358','🇫🇮 FI'],
+  ['+351','🇵🇹 PT'],['+30','🇬🇷 GR'],['+40','🇷🇴 RO'],['+359','🇧🇬 BG'],
+  ['+90','🇹🇷 TR'],['+972','🇮🇱 IL'],['+61','🇦🇺 AU'],['+64','🇳🇿 NZ'],
+  ['+65','🇸🇬 SG'],['+81','🇯🇵 JP'],['+82','🇰🇷 KR'],['+86','🇨🇳 CN'],
+  ['+91','🇮🇳 IN'],['+971','🇦🇪 AE'],['+966','🇸🇦 SA'],['+27','🇿🇦 ZA'],
+  ['+55','🇧🇷 BR'],['+52','🇲🇽 MX'],['+54','🇦🇷 AR'],['+7','🇷🇺 RU'],
+];
+function fillCountryCodes(){
+  const sel=$('g_cc'); if(!sel) return;
+  sel.innerHTML = DIAL_CODES.map(([code,label])=>
+    `<option value="${code}">${label} ${code}</option>`).join('');
+  sel.value = LANG==='de' ? '+49' : LANG==='hr' ? '+385' : '+44';
+}
+function fullPhone(){
+  const cc=($('g_cc')&&$('g_cc').value)||'';
+  let n=($('g_phone').value||'').trim().replace(/[^\d+]/g,'');
+  if(!n) return '';
+  if(n.startsWith('+')) return n;      // guest already typed the full number
+  n=n.replace(/^0+/,'');               // drop the local trunk zero: 091 -> 91
+  return cc+n;
+}
 const $=id=>document.getElementById(id);
 
 async function init(){
@@ -262,6 +296,7 @@ async function init(){
       'Ime i prezime':T.name,'Email':T.email,'Telefon (WhatsApp/Viber)':T.phone};
     if(m[el.textContent]) el.textContent=m[el.textContent];
   });
+  fillCountryCodes();
   $('g_name').placeholder=LANG==='en'?'John Smith':LANG==='de'?'Max Mustermann':'Ivan Horvat';
   $('bar').querySelector('.lbl').textContent=T.total;
   const ql=$('qty-label'); if(ql) ql.textContent=T.qty;
@@ -496,10 +531,11 @@ function next(){
 }
 
 async function submit(){
-  const name=$('g_name').value.trim(), email=$('g_email').value.trim(), phone=$('g_phone').value.trim();
+  const name=$('g_name').value.trim(), email=$('g_email').value.trim(), phone=fullPhone();
   $('err').classList.add('hide');
   if(!email||!email.includes('@')){ showErr(T.errEmail); return; }
   if(!name){ showErr(T.errName); return; }
+  if(!phone || phone.replace(/\D/g,'').length < 8){ showErr(T.errPhone); return; }
   const btn=$('bar-btn'); btn.disabled=true; btn.textContent=T.preparing;
   const start=`${$('date').value}T${$('time').value||'09:00'}:00`;
   try{
