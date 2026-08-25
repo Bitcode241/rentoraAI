@@ -62,6 +62,8 @@
   .stat .v{font-family:'Fraunces',serif;font-size:34px;font-weight:600;margin-top:6px}
   .stat .v small{font-size:15px;color:var(--mut)}
   .panel{background:#fff;border:1px solid var(--line);border-radius:4px;padding:22px}
+  /* wide tables (bookings) scroll inside the panel instead of spilling out */
+  .panel-scroll{overflow-x:auto}
   .panel h3{font-family:'Fraunces',serif;font-size:18px;margin-bottom:14px;font-weight:600}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--mut);
@@ -75,7 +77,8 @@
   .t-completed{background:#e6eef3;color:var(--deep)}
   .pill{display:inline-block;font-family:'IBM Plex Mono';font-size:10px;letter-spacing:1px;
     padding:2px 8px;border:1px solid var(--line);border-radius:20px;color:var(--mut);text-transform:uppercase}
-  .row-actions{display:flex;gap:6px}
+  .row-actions{display:flex;gap:5px;flex-wrap:wrap;min-width:190px;max-width:230px}
+  .row-actions .btn{white-space:nowrap}
   .toolbar{display:flex;gap:10px;margin-bottom:18px;align-items:center;flex-wrap:wrap}
   .toolbar input,.toolbar select{width:auto;margin:0;min-width:120px}
   .empty{color:var(--mut);font-size:13px;padding:24px;text-align:center}

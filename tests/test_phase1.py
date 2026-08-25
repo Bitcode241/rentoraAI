@@ -2060,3 +2060,71 @@ def test_bookings_list_shows_guest_details(client, auth):
     assert row["guest_phone"] == "+385911234567"
     assert row["asset_name"]  # real asset name, not just an id
     assert row["passengers"] == 2
+
+
+def test_inbox_threads_show_sender_and_needs_reply(client, auth):
+    """Inbox list must show who wrote, a preview, and whether a reply is pending."""
+    from app.core.database import SessionLocal
+    from app.models.email import EmailThread, EmailMessage
+    db = SessionLocal()
+    t = EmailThread(gmail_thread_id="tt1", subject="Availability?",
+                    intent="booking_request")
+    db.add(t); db.commit(); db.refresh(t)
+    db.add(EmailMessage(thread_id=t.id, sender="guest@example.com",
+                        subject="Availability?",
+                        body="Do you have jet skis tomorrow at 11?", direction="in"))
+    db.commit()
+    tid = t.id
+    db.close()
+    r = client.get("/api/emails/threads", headers=auth)
+    assert r.status_code == 200
+    row = next(x for x in r.json() if x["id"] == tid)
+    assert row["sender"] == "guest@example.com"
+    assert "jet skis" in row["preview"]
+    assert row["needs_reply"] is True  # guest wrote last, we haven't replied
+    # after we reply, it no longer needs attention
+    db = SessionLocal()
+    db.add(EmailMessage(thread_id=tid, sender="me@biz.com", subject="Re",
+                        body="Yes, we do!", direction="out"))
+    db.commit(); db.close()
+    r2 = client.get("/api/emails/threads", headers=auth)
+    row2 = next(x for x in r2.json() if x["id"] == tid)
+    assert row2["needs_reply"] is False
+
+
+def test_booking_detail_shows_balance_and_extras(client, auth):
+    """Detail view gives everything for the dock: balance to collect + add-ons."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.models.booking import Booking
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    jet = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    c = Customer(full_name="Marko Detalj", email="det@example.com", phone="+385991112223")
+    db.add(c); db.commit(); db.refresh(c)
+    now = datetime.now(timezone.utc)
+    b = Booking(asset_id=jet.id, customer_id=c.id,
+                start_datetime=now + timedelta(days=2),
+                end_datetime=now + timedelta(days=2, hours=1),
+                total_price=189, amount_paid=56.7, deposit_amount=56.7,
+                payment_status="deposit_paid", status="confirmed", passengers=2,
+                package_name="Adriatic Rush", utm_source="google",
+                pickup_location="Rixos",
+                notes="Add-ons: GoPro (+60.00 EUR)\nDodatna osoba (2/jet): +20.00 EUR")
+    db.add(b); db.commit()
+    bid = b.id
+    db.close()
+    r = client.get(f"/api/bookings/{bid}/detail", headers=auth)
+    assert r.status_code == 200
+    d = r.json()
+    assert d["guest"]["name"] == "Marko Detalj"
+    assert d["guest"]["phone"] == "+385991112223"
+    # balance = total - paid, the number that matters on the dock
+    assert d["money"]["balance"] == 132.3
+    assert d["money"]["total"] == 189
+    assert d["what"]["passengers"] == 2
+    assert d["pickup_location"] == "Rixos"
+    assert any("GoPro" in x for x in d["extras"])
+    assert any("Dodatna osoba" in x for x in d["extras"])
+    assert d["source"]["utm_source"] == "google"

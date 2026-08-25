@@ -90,6 +90,76 @@ def create_booking(payload: BookingCreate, db: Session = Depends(get_db),
     return b
 
 
+@router.get("/{booking_id}/detail")
+def booking_detail(booking_id: int, db: Session = Depends(get_db),
+                   _=Depends(get_current_user)):
+    """Everything about one booking in one place: guest, what they booked, what's
+    paid, what's still to collect, add-ons, meeting point and marketing source."""
+    from app.models.customer import Customer
+    from app.models.asset import Asset
+    from app.services import settings_service
+    b = db.get(Booking, booking_id)
+    if not b:
+        raise HTTPException(404, "Booking not found")
+    c = db.get(Customer, b.customer_id) if b.customer_id else None
+    a = db.get(Asset, b.asset_id) if b.asset_id else None
+    total = b.total_price or 0
+    paid = b.amount_paid or 0
+    balance = round(max(total - paid, 0), 2)
+    # extras were recorded as human-readable lines in notes at booking time
+    extras = []
+    for line in (b.notes or "").split("\n"):
+        line = line.strip()
+        if line and any(k in line.lower() for k in
+                        ("add-on", "dodatna osoba", "transfer", "extra")):
+            extras.append(line)
+    name = ""
+    if c:
+        name = (c.full_name or "").strip()
+        if name and "@" in name and name == (c.email or ""):
+            name = ""
+    # is this a partner asset (someone else's boat) — affects who collects cash
+    is_partner = bool(a and getattr(a, "provider_type", "") == "partner")
+    return {
+        "id": b.id,
+        "status": b.status,
+        "payment_status": b.payment_status,
+        "guest": {
+            "name": name,
+            "email": (c.email if c else "") or "",
+            "phone": (c.phone if c else "") or "",
+        },
+        "what": {
+            "asset_name": (a.name if a else "") or f"#{b.asset_id}",
+            "asset_type": (a.asset_type if a else "") or "",
+            "package_name": b.package_name or "",
+            "passengers": getattr(b, "passengers", 0) or 0,
+            "start": b.start_datetime,
+            "end": b.end_datetime,
+        },
+        "money": {
+            "total": round(total, 2),
+            "paid": round(paid, 2),
+            "balance": balance,
+            "deposit_amount": round(b.deposit_amount or 0, 2),
+            "currency": "EUR",
+        },
+        "extras": extras,
+        "pickup_location": getattr(b, "pickup_location", "") or "",
+        "transfer_note": getattr(b, "transfer_note", "") or "",
+        "notes": b.notes or "",
+        "source": {
+            "channel": b.source or "",
+            "utm_source": getattr(b, "utm_source", "") or "",
+            "utm_campaign": getattr(b, "utm_campaign", "") or "",
+        },
+        "is_partner": is_partner,
+        "partner_name": (getattr(a, "provider_name", "") or "") if is_partner else "",
+        "meeting_note": settings_service.get(db, "meeting_note", "") or "",
+        "created_at": b.created_at,
+    }
+
+
 @router.get("/{booking_id}", response_model=BookingOut)
 def get_booking(booking_id: int, db: Session = Depends(get_db), _=Depends(get_current_user)):
     b = db.get(Booking, booking_id)

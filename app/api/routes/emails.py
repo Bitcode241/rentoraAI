@@ -14,11 +14,40 @@ router = APIRouter(prefix="/api/emails", tags=["emails"])
 
 @router.get("/threads")
 def list_threads(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Threads with who wrote, the last message preview, when, and whether it still
+    needs a reply — so the inbox shows what's actually waiting."""
+    from app.models.customer import Customer
     threads = db.query(EmailThread).order_by(EmailThread.updated_at.desc()).all()
-    return [{"id": t.id, "subject": t.subject, "intent": t.intent,
-             "customer_id": t.customer_id,
-             "messages": db.query(EmailMessage).filter(
-                 EmailMessage.thread_id == t.id).count()} for t in threads]
+    out = []
+    for t in threads:
+        msgs = (db.query(EmailMessage)
+                .filter(EmailMessage.thread_id == t.id)
+                .order_by(EmailMessage.created_at).all())
+        last = msgs[-1] if msgs else None
+        first_in = next((m for m in msgs if m.direction == "in"), None)
+        sender = ""
+        if first_in and first_in.sender:
+            sender = first_in.sender
+        elif t.customer_id:
+            c = db.get(Customer, t.customer_id)
+            sender = (c.email if c else "") or ""
+        preview = ""
+        if last and last.body:
+            preview = " ".join((last.body or "").split())[:140]
+        out.append({
+            "id": t.id,
+            "subject": t.subject or "",
+            "intent": t.intent or "",
+            "customer_id": t.customer_id,
+            "messages": len(msgs),
+            "sender": sender,
+            "preview": preview,
+            "last_at": last.created_at if last else t.updated_at,
+            "last_direction": last.direction if last else "",
+            # needs attention when the guest wrote last and we haven't replied
+            "needs_reply": bool(last and last.direction == "in"),
+        })
+    return out
 
 
 @router.get("/threads/{thread_id}")

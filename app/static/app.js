@@ -280,7 +280,7 @@ const RENDER = {
   'Bookings': async (v)=>{
     const b = await api('/api/bookings');
     v.innerHTML = `<div class="toolbar"><button class="btn btn-sm" onclick="bookingModal()">+ New booking</button></div>
-      <div class="panel">${bookingTable(b,true)}</div>`;
+      <div class="panel panel-scroll">${bookingTable(b,true)}</div>`;
   },
   'Settings': async (v)=>{
     const [lt, biz] = await Promise.all([api('/api/settings/lead-times'), api('/api/settings/business')]);
@@ -347,11 +347,30 @@ const RENDER = {
   },
   'Email Inbox': async (v)=>{
     const t = await api('/api/emails/threads');
-    v.innerHTML = `<div class="toolbar"><button class="btn btn-sm" onclick="processInbox()">⟳ Process unread</button></div>
-      <div class="panel"><table><thead><tr><th>Subject</th><th>Intent</th><th>Messages</th></tr></thead><tbody>
-      ${t.map(x=>`<tr><td>${x.subject||'(no subject)'}</td><td><span class="pill">${x.intent||'—'}</span></td>
-      <td>${x.messages}</td></tr>`).join('')||'<tr><td colspan=3 class="empty">Inbox empty — connect Gmail credentials to ingest mail</td></tr>'}
-      </tbody></table></div>`;
+    const waiting = t.filter(x=>x.needs_reply).length;
+    v.innerHTML = `<div class="toolbar">
+        <button class="btn btn-sm" onclick="processInbox()">⟳ Provjeri nove</button>
+        ${waiting?`<span style="font-size:13px;color:var(--warn);font-weight:600">${waiting} čeka tvoj odgovor</span>`:'<span style="font-size:13px;color:var(--mut)">Sve odgovoreno ✓</span>'}
+      </div>
+      ${!t.length?'<div class="panel"><div class="empty">Inbox prazan — poveži Gmail u Mail Settings da poruke dolaze ovdje</div></div>':
+      t.map(x=>`
+        <div class="panel" style="padding:14px 16px;margin-bottom:10px;cursor:pointer;${x.needs_reply?'border-left:3px solid var(--warn)':''}"
+             onclick="openThread(${x.id})">
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+            <div style="min-width:0;flex:1">
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:3px;flex-wrap:wrap">
+                <b style="font-size:14px">${x.sender||'Nepoznat pošiljatelj'}</b>
+                ${x.intent?`<span class="pill">${x.intent}</span>`:''}
+                ${x.needs_reply?'<span class="tag t-pending">treba odgovor</span>':''}
+              </div>
+              <div style="font-weight:600;font-size:13px;margin-bottom:4px">${x.subject||'(bez naslova)'}</div>
+              <div style="font-size:12px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${x.preview||''}</div>
+            </div>
+            <div style="text-align:right;white-space:nowrap;font-size:11px;color:var(--mut)">
+              ${fmt(x.last_at)}<br><span style="font-size:10px">${x.messages} por.</span>
+            </div>
+          </div>
+        </div>`).join('')}`;
   },
   'Calendar': async (v)=>{
     await renderCalendar(v, window._calStart);
@@ -436,7 +455,9 @@ function bookingTable(b, full){
       const nm = (x.guest_name||'').trim();
       const em = (x.guest_email||'').trim();
       const ph = (x.guest_phone||'').trim();
-      const guest = nm ? `<b>${nm}</b>` : '<span style="color:var(--mut)">bez imena</span>';
+      const guest = nm
+        ? `<b style="cursor:pointer;text-decoration:underline dotted" onclick="openDetail(${x.id})">${nm}</b>`
+        : `<span style="color:var(--mut);cursor:pointer;text-decoration:underline dotted" onclick="openDetail(${x.id})">bez imena</span>`;
       const contact = [
         em ? `<a href="mailto:${em}" style="color:inherit">${em}</a>` : '',
         ph ? `<a href="tel:${ph}" style="color:inherit">${ph}</a>` : ''
@@ -1194,6 +1215,82 @@ function setPrimaryMP(i){ MP.forEach((p,idx)=>p.primary=(idx===i)); }
 function addMeetingPoint(){ MP.push({name:'',maps_url:'',note:'',primary:MP.length===0}); renderMeetingPoints(); }
 function delMeetingPoint(i){ const wasP=MP[i]&&MP[i].primary; MP.splice(i,1); if(wasP&&MP.length) MP[0].primary=true; renderMeetingPoints(); }
 function collectMeetingPoints(){ return MP.filter(p=>(p.name||'').trim()); }
+
+async function openDetail(id){
+  try{
+    const d = await api('/api/bookings/'+id+'/detail');
+    const g=d.guest||{}, w=d.what||{}, m=d.money||{}, s=d.source||{};
+    const wa = (g.phone||'').replace(/[^0-9]/g,'');
+    const row=(k,v)=>v?`<div style="display:flex;justify-content:space-between;gap:14px;padding:7px 0;border-bottom:1px solid var(--line)">
+        <span style="color:var(--mut);font-size:12px">${k}</span>
+        <span style="font-size:13px;text-align:right">${v}</span></div>`:'';
+    openModal(`
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <div><h3 style="margin:0 0 2px">${g.name||'Gost bez imena'}</h3>
+          <div style="font-size:12px;color:var(--mut)">Rezervacija #${d.id}</div></div>
+        <div style="text-align:right">${statusTag(d.status)}<br>${payTag(d.payment_status)}</div>
+      </div>
+
+      <!-- what matters at the dock: how much to collect -->
+      <div style="background:${m.balance>0?'#fff8e6':'#e8f5ee'};border:1px solid ${m.balance>0?'var(--warn)':'var(--good)'};
+           border-radius:10px;padding:14px 16px;margin:16px 0">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--mut)">
+          ${m.balance>0?'Za naplatiti na licu mjesta':'Plaćeno u cijelosti'}</div>
+        <div style="font-size:28px;font-weight:800;line-height:1.2">${money(m.balance)}</div>
+        <div style="font-size:12px;color:var(--mut);margin-top:2px">
+          Ukupno ${money(m.total)} · već plaćeno ${money(m.paid)}</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div>
+          <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--mut);margin-bottom:4px">Rezervacija</div>
+          ${row('Plovilo', w.asset_name)}
+          ${row('Tura', w.package_name)}
+          ${row('Polazak', fmt(w.start))}
+          ${row('Broj gostiju', w.passengers||'—')}
+          ${row('Lokacija', d.pickup_location||d.meeting_note||'—')}
+        </div>
+        <div>
+          <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--mut);margin-bottom:4px">Kontakt</div>
+          ${row('Email', g.email?`<a href="mailto:${g.email}" style="color:inherit">${g.email}</a>`:'')}
+          ${row('Telefon', g.phone?`<a href="tel:${g.phone}" style="color:inherit">${g.phone}</a>`:'')}
+          ${row('Izvor', (s.utm_source||s.channel||'—')+(s.utm_campaign?` · ${s.utm_campaign}`:''))}
+          ${d.is_partner?row('Partner', d.partner_name||'da'):''}
+        </div>
+      </div>
+
+      ${(d.extras&&d.extras.length)?`
+        <div style="margin-top:16px">
+          <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--mut);margin-bottom:6px">Dodaci</div>
+          ${d.extras.map(x=>`<div style="font-size:13px;padding:6px 10px;background:var(--sand);border-radius:6px;margin-bottom:5px">${x}</div>`).join('')}
+        </div>`:''}
+
+      ${d.transfer_note?`<div style="margin-top:12px;font-size:13px;padding:8px 10px;background:#e8f2f7;border-radius:6px">🚐 ${d.transfer_note}</div>`:''}
+
+      <div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap">
+        ${wa?`<a class="btn btn-sm" href="https://wa.me/${wa}" target="_blank" style="text-decoration:none">WhatsApp gostu</a>`:''}
+        ${g.phone?`<a class="btn btn-sm btn-ghost" href="tel:${g.phone}" style="text-decoration:none">Nazovi</a>`:''}
+        <button class="btn btn-sm btn-ghost" onclick="openVoucher(${d.id})">Voucher</button>
+        <button class="btn btn-ghost" onclick="closeModal()">Zatvori</button>
+      </div>`);
+  }catch(e){ alert(e.message||'Greška'); }
+}
+
+async function openThread(id){
+  try{
+    const msgs = await api('/api/emails/threads/'+id);
+    const body = msgs.map(m=>`
+      <div style="margin-bottom:12px;padding:10px 12px;border-radius:8px;
+           background:${m.direction==='in'?'var(--sand)':'#e8f2f7'}">
+        <div style="font-size:11px;color:var(--mut);margin-bottom:4px">
+          ${m.direction==='in'?'Gost':'Mi'} · ${m.sender||''} · ${fmt(m.created_at)}</div>
+        <div style="font-size:13px;white-space:pre-wrap">${(m.body||'').replace(/</g,'&lt;')}</div>
+      </div>`).join('') || '<div class="empty">Nema poruka</div>';
+    openModal(`<h3 style="margin-top:0">Razgovor</h3>
+      <div class="convo" style="max-height:420px;overflow:auto">${body}</div>
+      <div style="margin-top:16px"><button class="btn btn-ghost" onclick="closeModal()">Zatvori</button></div>`);
+  }catch(e){ alert(e.message||'Greška'); }
+}
 
 async function saveBusiness(){
   try{
