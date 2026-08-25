@@ -95,6 +95,54 @@
   .msg.inbound{background:var(--sand);align-self:flex-start}
   .msg.outbound{background:var(--deep);color:var(--sand);align-self:flex-end}
   .msg .meta{font-size:9px;opacity:.6;margin-top:3px;text-transform:uppercase;letter-spacing:1px}
+  /* ---------- Mobile (phone) ---------- */
+  .mobile-bar{display:none}
+  @media (max-width: 820px){
+    /* top bar with hamburger replaces the fixed sidebar */
+    .mobile-bar{display:flex;align-items:center;gap:12px;background:var(--ink);color:var(--sand);
+      padding:12px 14px;position:sticky;top:0;z-index:40}
+    .mobile-bar .mb-title{font-family:'Fraunces',serif;font-size:17px;font-weight:700;flex:1;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .mb-burger{background:none;color:var(--sand);font-size:24px;line-height:1;padding:4px 6px}
+
+    .shell{grid-template-columns:1fr}
+    aside{position:fixed;top:0;left:0;bottom:0;width:260px;height:100vh;z-index:50;
+      transform:translateX(-102%);transition:transform .22s ease;overflow-y:auto;
+      box-shadow:2px 0 20px rgba(0,0,0,.25)}
+    body.nav-open aside{transform:translateX(0)}
+    body.nav-open::after{content:'';position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:45}
+    nav a{padding:13px 14px;font-size:15px}   /* touch-sized */
+
+    main{padding:16px 14px;max-height:none}
+    header.top{display:none}          /* mobile bar already shows the page name */
+
+    .panel{padding:14px;border-radius:8px}
+    .grid.g3,.grid.g2{grid-template-columns:1fr}
+
+    /* tables become stacked cards — no more sideways scrolling */
+    table,thead,tbody,th,td,tr{display:block}
+    thead{position:absolute;left:-9999px}       /* hide header row */
+    tr{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px;
+      background:#fff}
+    tr:hover td{background:transparent}
+    td{border:none;padding:5px 0;display:flex;justify-content:space-between;gap:14px;
+      align-items:flex-start;text-align:right}
+    td::before{content:attr(data-l);color:var(--mut);font-size:11px;text-transform:uppercase;
+      letter-spacing:.5px;text-align:left;flex-shrink:0}
+    td:empty{display:none}
+    .row-actions{max-width:none;min-width:0;justify-content:flex-start;padding-top:10px;
+      border-top:1px solid var(--line);margin-top:6px}
+    .row-actions::before{content:''}
+    .row-actions .btn{flex:1;min-width:calc(50% - 3px);text-align:center;padding:10px 8px;font-size:13px}
+
+    /* modals fill the screen on a phone */
+    .modal{width:100%;max-width:100%;border-radius:14px 14px 0 0;padding:20px 16px;
+      max-height:92vh;margin-top:auto}
+    #modalbg{align-items:flex-end}
+    input,select,textarea{font-size:16px}  /* stops iOS zoom-on-focus */
+    .btn{padding:12px 16px}
+    .toolbar{gap:8px}
+  }
 </style>
 </head>
 <body>
@@ -116,6 +164,11 @@
     <nav id="nav"></nav>
   </aside>
   <main>
+    <div class="mobile-bar">
+      <button class="mb-burger" onclick="toggleNav()" aria-label="Izbornik">☰</button>
+      <div class="mb-title" id="mtitle">Dashboard</div>
+      <div class="logout" style="color:var(--aqua)" onclick="logout()">↪</div>
+    </div>
     <header class="top">
       <div><h2 id="ptitle">Dashboard</h2><div class="sub" id="psub"></div></div>
       <div class="logout" onclick="logout()">↪ Sign out</div>

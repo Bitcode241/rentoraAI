@@ -2166,3 +2166,51 @@ def test_checkout_returns_guest_info_for_sending(client, auth, monkeypatch):
     assert d["guest_phone"] == "+48501234567"
     assert d["amount"] == 84
     assert d["emailed"] is False  # not emailed unless asked
+
+
+def test_deposit_link_emails_guest(monkeypatch):
+    """send_email=true actually mails the payment link to the guest."""
+    import app.services.payment_service as ps
+    import app.integrations.email_imap as ei
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.models.booking import Booking
+    from app.api.routes.payments import create_checkout
+    from datetime import datetime, timezone, timedelta
+    monkeypatch.setattr(ps, "create_deposit_checkout",
+                        lambda b, name, guest_email="", override_amount=None,
+                        group_booking_ids=None, attribution=None:
+                        {"url": "https://checkout.stripe.com/c/pay/cs_x",
+                         "session_id": "cs_x"})
+    sent = {}
+
+    class _FakeMgr:
+        enabled = True
+        services = {"info@biz.com": 1}
+        def reply_from(self, box, to, subject, body, **kw):
+            sent["to"] = to; sent["subject"] = subject; sent["body"] = body
+            return "ok"
+        @classmethod
+        def from_db(cls, db):
+            return cls()
+
+    monkeypatch.setattr(ei, "MultiMailboxManager", _FakeMgr)
+    db = SessionLocal()
+    jet = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    c = Customer(full_name="Mail Test", email="mail@example.com", phone="+385991")
+    db.add(c); db.commit(); db.refresh(c)
+    now = datetime.now(timezone.utc)
+    b = Booking(asset_id=jet.id, customer_id=c.id,
+                start_datetime=now + timedelta(days=3),
+                end_datetime=now + timedelta(days=3, hours=1),
+                total_price=250, amount_paid=0, deposit_amount=84,
+                payment_status="unpaid", status="pending", passengers=2,
+                package_name="Safari 120")
+    db.add(b); db.commit()
+    bid = b.id
+    res = create_checkout(bid, send_email=True, db=db, _=None)
+    assert res["emailed"] is True
+    assert sent["to"] == "mail@example.com"
+    assert "checkout.stripe.com" in sent["body"]
+    db.close()

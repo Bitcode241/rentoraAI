@@ -60,10 +60,16 @@ function boot(){
 function setActive(p){ document.querySelectorAll('#nav a').forEach(a=>
   a.classList.toggle('active', a.dataset.p===p)); }
 
+function toggleNav(){ document.body.classList.toggle('nav-open'); }
+function closeNav(){ document.body.classList.remove('nav-open'); }
+
 async function go(page){
   setActive(page);
   document.getElementById('ptitle').textContent = page;
   document.getElementById('psub').textContent = SUBS[page]||'';
+  const mt = document.getElementById('mtitle');
+  if(mt) mt.textContent = page;
+  closeNav();                       // close the drawer after picking a page
   const v = document.getElementById('view');
   v.innerHTML = '<div class="empty">Loading…</div>';
   try{ await RENDER[page](v); }
@@ -464,17 +470,17 @@ function bookingTable(b, full){
       ].filter(Boolean).join('<br>') || '<span style="color:var(--mut)">—</span>';
       const src = (x.utm_source||x.source||'').trim();
       return `<tr>
-      <td class="mono">${x.id}</td>
-      <td>${guest}</td>
-      <td style="font-size:12px;line-height:1.5">${contact}</td>
-      <td>${x.asset_name||('#'+x.asset_id)}</td>
-      <td>${x.package_name||'—'}</td>
-      <td style="white-space:nowrap">${fmt(x.start_datetime)}</td>
-      <td style="text-align:center">${x.passengers||'—'}</td>
-      <td>${money(x.total_price)}</td>
-      <td>${x.amount_paid?money(x.amount_paid):'—'}</td>
-      <td>${statusTag(x.status)}<br>${payTag(x.payment_status)}</td>
-      <td><span class="pill">${src||'—'}</span></td>
+      <td class="mono" data-l="#">${x.id}</td>
+      <td data-l="Gost">${guest}</td>
+      <td data-l="Kontakt" style="font-size:12px;line-height:1.5">${contact}</td>
+      <td data-l="Plovilo">${x.asset_name||('#'+x.asset_id)}</td>
+      <td data-l="Tura">${x.package_name||'—'}</td>
+      <td data-l="Polazak" style="white-space:nowrap">${fmt(x.start_datetime)}</td>
+      <td data-l="Osoba" style="text-align:center">${x.passengers||'—'}</td>
+      <td data-l="Ukupno">${money(x.total_price)}</td>
+      <td data-l="Plaćeno">${x.amount_paid?money(x.amount_paid):'—'}</td>
+      <td data-l="Status">${statusTag(x.status)}<br>${payTag(x.payment_status)}</td>
+      <td data-l="Izvor"><span class="pill">${src||'—'}</span></td>
       ${full?`<td class="row-actions">${x.status==='pending'?`<button class="btn btn-sm" onclick="confirmB(${x.id})">Confirm</button>`:''}
       ${(x.payment_status!=='deposit_paid')?`<button class="btn btn-sm" onclick="chargeDeposit(${x.id})">Naplati depozit</button>`:''}
       ${(x.payment_status!=='deposit_paid')?`<button class="btn btn-sm btn-ghost" onclick="editDeposit(${x.id},${x.deposit_amount||0})">Uredi depozit</button>`:''}

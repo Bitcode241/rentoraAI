@@ -43,7 +43,7 @@ def create_checkout(booking_id: int, send_email: bool = False,
         try:
             from app.services import settings_service
             from app.core.timeutil import fmt_local
-            from app.integrations.mail_manager import MultiMailboxManager
+            from app.integrations.email_imap import MultiMailboxManager
             business = settings_service.business_name(db)
             when = fmt_local(b.start_datetime)
             subject = f"Payment link — {business}"
@@ -219,14 +219,26 @@ def _notify_owner_paid(db, booking, group=None):
     asset_label = f"{qty}× {base_name}" if qty > 1 else (asset.name if asset else "—")
     g_paid = sum(b.amount_paid or 0 for b in group)
     g_total = sum(b.total_price or 0 for b in group)
-    body = (f"Gost je platio depozit!\n\n"
+    g_balance = max(g_total - g_paid, 0)
+    pax = sum(getattr(b, "passengers", 0) or 0 for b in group)
+    src = getattr(booking, "utm_source", "") or booking.source or ""
+    pickup = getattr(booking, "pickup_location", "") or ""
+    body = (f"NOVA REZERVACIJA — depozit plaćen\n\n"
+            f"Gost: {cust.full_name if cust else ''}\n"
+            f"Telefon: {(cust.phone if cust else '') or '—'}\n"
+            f"Email: {(cust.email if cust else '') or '—'}\n\n"
             f"Plovilo: {asset_label}\n"
             f"Termin: {when}\n"
-            f"Gost: {cust.full_name if cust else ''} ({cust.email if cust else ''})\n"
-            f"Depozit: {g_paid:.2f} EUR\n"
-            f"Ukupno: {g_total:.2f} EUR\n"
+            f"Osoba: {pax or '—'}\n"
+            f"{('Lokacija: ' + pickup + chr(10)) if pickup else ''}"
+            f"\nPlaćeno: {g_paid:.2f} EUR\n"
+            f"ZA NAPLATITI NA LICU MJESTA: {g_balance:.2f} EUR\n"
+            f"Ukupno: {g_total:.2f} EUR\n\n"
+            f"{('Izvor: ' + src + chr(10)) if src else ''}"
             f"Rezervacija #{booking.id} — POTVRĐENA")
-    mgr.reply_from(box, box, f"[PLAĆENO] Depozit — {asset_label} #{booking.id}", body)
+    mgr.reply_from(box, box,
+                   f"[NOVA] {cust.full_name if cust else 'Gost'} — {asset_label} — {when}",
+                   body)
 
 
 def _send_confirmation(db, booking, group=None):
