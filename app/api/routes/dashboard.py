@@ -14,6 +14,14 @@ def admin():
     return FileResponse("app/static/admin.html", media_type="text/html")
 
 
+@router.get("/api/dashboard/money")
+def dashboard_money(days: int = 30, db: Session = Depends(get_db),
+                    _=Depends(get_current_user)):
+    """Revenue split (online vs cash) with VAT and card fees."""
+    from app.services import money_service
+    return money_service.money_overview(db, days)
+
+
 @router.get("/api/dashboard/sources")
 def dashboard_sources(db: Session = Depends(get_db),
                       _=Depends(get_current_user)):

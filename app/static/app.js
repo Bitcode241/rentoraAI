@@ -1,12 +1,13 @@
 const API = '';
 let TOKEN = '';
 let DASH = null;
-const PAGES = ['Dashboard','Calendar','Assets','Tours','Transfers','Add-ons','Widget','Bookings','Izvori','Customers','Email Inbox','Mail Settings',
+const PAGES = ['Dashboard','Calendar','Assets','Tours','Transfers','Add-ons','Widget','Bookings','Novac','Izvori','Customers','Email Inbox','Mail Settings',
   'Settings',
   'Revenue Overview','Upcoming Reservations',
   "Today's Reservations",'Recent Conversations'];
 const SUBS = {
   'Dashboard':'Live operational overview',
+  'Novac':'Koliko je ušlo i koliko ti stvarno ostaje',
   'Izvori':'Odakle dolaze gosti (Google Ads, WhatsApp...)',
   'Tours':'Katalog tura — jedna tura, jedan ID',
   'Assets':'Fleet — boats & jet skis',
@@ -138,6 +139,42 @@ const RENDER = {
       <td class="row-actions"><button class="btn btn-sm btn-ghost" onclick="radiusModal(${r.id})">Uredi</button>
       <button class="btn btn-sm btn-ghost" onclick="delRadius(${r.id})">Obriši</button></td></tr>`).join('')
       ||'<tr><td colspan=6 class="empty">Nema GPS zona — dodaj prvu</td></tr>'}</tbody></table></div>`;
+  },
+  'Novac': async (v)=>{
+    const d = await api('/api/dashboard/money?days=30');
+    const line=(label,val,cls)=>`<div style="display:flex;justify-content:space-between;gap:14px;
+        padding:9px 0;border-bottom:1px solid var(--line)">
+        <span style="color:var(--mut);font-size:13px">${label}</span>
+        <b style="font-variant-numeric:tabular-nums;${cls||''}">${val}</b></div>`;
+    v.innerHTML = `
+      <div style="display:flex;gap:14px;margin-bottom:16px;flex-wrap:wrap">
+        <div class="panel" style="flex:1;min-width:150px;padding:16px">
+          <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px">Bruto (30 dana)</div>
+          <div style="font-size:26px;font-weight:800">${money(d.gross)}</div>
+          <div style="font-size:12px;color:var(--mut)">${d.bookings} rezervacija</div></div>
+        <div class="panel" style="flex:1;min-width:150px;padding:16px">
+          <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px">Tebi ostaje</div>
+          <div style="font-size:26px;font-weight:800;color:var(--good)">${money(d.net)}</div>
+          <div style="font-size:12px;color:var(--mut)">nakon PDV-a i naknada</div></div>
+      </div>
+      <div class="panel" style="max-width:520px">
+        <h3 style="margin-top:0">Odakle je novac došao</h3>
+        ${line('Karticom (online)', money(d.online))}
+        ${line('Gotovinom na licu mjesta', money(d.cash))}
+        ${line('<b>Ukupno naplaćeno</b>', '<b>'+money(d.gross)+'</b>')}
+        <h3 style="margin-top:20px">Što odlazi</h3>
+        ${line(`Stripe naknada (${d.card_fee_pct}% na kartice)`, '−'+money(d.card_fee),'color:var(--bad)')}
+        ${d.in_vat_system
+          ? line(`PDV (${d.vat_rate}% na ukupan promet)`, '−'+money(d.vat),'color:var(--bad)')
+          : line('PDV', 'nisi u sustavu PDV-a','color:var(--mut);font-weight:400')}
+        ${line('<b>Tebi ostaje</b>', '<b style="color:var(--good)">'+money(d.net)+'</b>')}
+        ${d.outstanding>0?`<div style="margin-top:14px;background:#fff8e6;border:1px solid var(--warn);
+          border-radius:8px;padding:10px 12px;font-size:13px">
+          Nenaplaćeno: <b>${money(d.outstanding)}</b> — gosti koji još duguju.</div>`:''}
+      </div>
+      ${d.in_vat_system?`<p style="font-size:12px;color:var(--mut);max-width:520px;margin-top:12px">
+        PDV se obračunava na promet bez obzira na način plaćanja (kartica ili gotovina).
+        Za tvoje konkretne porezne obveze pitaj knjigovođu.</p>`:''}`;
   },
   'Izvori': async (v)=>{
     const d = await api('/api/dashboard/sources');
@@ -329,6 +366,17 @@ const RENDER = {
         </div>
         <div id="push_devices" style="margin-bottom:6px"></div>
         <div id="push_msg" style="font-size:13px"></div>
+      </div>
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line)">
+        <div style="font-weight:700;font-size:14px;margin-bottom:4px">Porez i naknade (za stranicu "Novac")</div>
+        <div style="font-size:12px;color:var(--mut);margin-bottom:10px">Koristi se samo za tvoj informativni pregled zarade. Za stvarne porezne obveze pitaj knjigovođu.</div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="set_in_vat" style="width:auto" ${biz.in_vat_system?'checked':''}>
+          U sustavu sam PDV-a</label>
+        <label>Stopa PDV-a (%)</label>
+        <input id="set_vat" type="number" min="0" max="100" step="0.1" value="${biz.vat_rate||'25'}">
+        <label>Stripe naknada (%) — prosjek</label>
+        <input id="set_fee" type="number" min="0" max="10" step="0.1" value="${biz.stripe_fee_pct||'3.6'}">
       </div>
       <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line)">
         <div style="font-weight:700;font-size:14px;margin-bottom:4px">Google Ads praćenje konverzija</div>
@@ -1347,11 +1395,28 @@ async function openDetail(id){
       ${d.transfer_note?`<div style="margin-top:12px;font-size:13px;padding:8px 10px;background:#e8f2f7;border-radius:6px">🚐 ${d.transfer_note}</div>`:''}
 
       <div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap">
-        ${wa?`<a class="btn btn-sm" href="https://wa.me/${wa}" target="_blank" style="text-decoration:none">WhatsApp gostu</a>`:''}
+        ${m.balance>0?`<button class="btn btn-sm" onclick="recordCash(${d.id},${m.balance})">Naplaćeno u gotovini</button>`:''}
+        ${wa?`<a class="btn btn-sm btn-ghost" href="https://wa.me/${wa}" target="_blank" style="text-decoration:none">WhatsApp gostu</a>`:''}
         ${g.phone?`<a class="btn btn-sm btn-ghost" href="tel:${g.phone}" style="text-decoration:none">Nazovi</a>`:''}
         <button class="btn btn-sm btn-ghost" onclick="openVoucher(${d.id})">Voucher</button>
         <button class="btn btn-ghost" onclick="closeModal()">Zatvori</button>
       </div>`);
+  }catch(e){ alert(e.message||'Greška'); }
+}
+
+async function recordCash(id, suggested){
+  const v=prompt('Koliko je gost platio u gotovini (EUR)?', suggested||'');
+  if(v===null) return;
+  const amount=parseFloat(String(v).replace(',','.'));
+  if(isNaN(amount)||amount<0){ alert('Neispravan iznos.'); return; }
+  try{
+    const r=await api('/api/bookings/'+id+'/cash',{method:'POST',
+      body:JSON.stringify({amount})});
+    closeModal();
+    go('Bookings');
+    setTimeout(()=>alert(r.balance>0
+      ? `Zabilježeno ${amount.toFixed(2)} €. Ostaje još ${r.balance.toFixed(2)} €.`
+      : `Zabilježeno ${amount.toFixed(2)} € — rezervacija je podmirena ✓`), 200);
   }catch(e){ alert(e.message||'Greška'); }
 }
 
@@ -1461,6 +1526,9 @@ async function saveBusiness(){
       whatsapp_number:val('set_wa'),
       google_ads_id:val('set_ads_id'),
       google_ads_label:val('set_ads_label'),
+      vat_rate:val('set_vat')||'25',
+      stripe_fee_pct:val('set_fee')||'3.6',
+      in_vat_system:document.getElementById('set_in_vat')?document.getElementById('set_in_vat').checked:true,
       meeting_points:collectMeetingPoints(),
       jetski_extra_person_fee:+val('set_extra')||0,
       default_deposit_percent:+val('set_dep')||30})});

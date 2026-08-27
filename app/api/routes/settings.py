@@ -47,6 +47,9 @@ def get_business(db: Session = Depends(get_db), _=Depends(get_current_user)):
         "whatsapp_number": meeting_service.get_whatsapp_number(db),
         "google_ads_id": settings_service.get(db, "google_ads_id", "") or "",
         "google_ads_label": settings_service.get(db, "google_ads_label", "") or "",
+        "vat_rate": settings_service.get(db, "vat_rate", "25") or "25",
+        "stripe_fee_pct": settings_service.get(db, "stripe_fee_pct", "3.6") or "3.6",
+        "in_vat_system": (settings_service.get(db, "in_vat_system", "1") or "1") == "1",
         "default_deposit_percent": settings_service.default_deposit_percent(db),
         "jetski_extra_person_fee": settings_service.jetski_extra_person_fee(db),
         "brand_boat": settings_service.brand_for_type(db, "boat"),
@@ -85,6 +88,13 @@ def update_business(payload: dict, db: Session = Depends(get_db)):
         settings_service.set(db, "google_ads_id", str(payload["google_ads_id"]).strip())
     if "google_ads_label" in payload:
         settings_service.set(db, "google_ads_label", str(payload["google_ads_label"]).strip())
+    if "vat_rate" in payload:
+        settings_service.set(db, "vat_rate", str(payload["vat_rate"]).strip() or "25")
+    if "stripe_fee_pct" in payload:
+        settings_service.set(db, "stripe_fee_pct", str(payload["stripe_fee_pct"]).strip() or "3.6")
+    if "in_vat_system" in payload:
+        settings_service.set(db, "in_vat_system",
+                             "1" if payload["in_vat_system"] else "0")
     if "default_deposit_percent" in payload:
         settings_service.set(db, settings_service.DEFAULT_DEPOSIT_KEY,
                              str(payload["default_deposit_percent"]))

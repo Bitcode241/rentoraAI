@@ -39,6 +39,9 @@ class Booking(Base):
     utm_medium: Mapped[str] = mapped_column(String(120), default="")
     utm_campaign: Mapped[str] = mapped_column(String(120), default="")
     gclid: Mapped[str] = mapped_column(String(255), default="")
+    # cash collected on site (separate from online/card payments)
+    cash_collected: Mapped[float] = mapped_column(Float, default=0.0)
+    cash_note: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     asset = relationship("Asset")

@@ -2313,3 +2313,40 @@ def test_widget_has_country_code_picker():
     assert "function fullPhone" in html        # combines code + number
     assert "phone=fullPhone()" in html         # and it's what gets submitted
     assert "errPhone" in html                  # phone is validated, not optional
+
+
+def test_cash_recording_and_money_overview(client, auth):
+    """Cash collected on site settles the booking and shows in the money view."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.models.booking import Booking
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    jet = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    c = Customer(full_name="Cash Guest", email="cash@example.com")
+    db.add(c); db.commit(); db.refresh(c)
+    now = datetime.now(timezone.utc)
+    b = Booking(asset_id=jet.id, customer_id=c.id,
+                start_datetime=now - timedelta(days=1),
+                end_datetime=now - timedelta(days=1) + timedelta(hours=1),
+                total_price=300, amount_paid=75, deposit_amount=75,
+                payment_status="deposit_paid", status="confirmed",
+                passengers=2, package_name="1h")
+    db.add(b); db.commit()
+    bid = b.id
+    db.close()
+    # record the 225 EUR collected in cash
+    r = client.post(f"/api/bookings/{bid}/cash", headers=auth, json={"amount": 225})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["cash_collected"] == 225
+    assert d["balance"] == 0
+    assert d["payment_status"] == "paid"   # fully settled
+    # money overview splits card vs cash and applies VAT to the whole turnover
+    m = client.get("/api/dashboard/money?days=30", headers=auth).json()
+    assert m["online"] >= 75 and m["cash"] >= 225
+    assert m["gross"] >= 300
+    # VAT is computed on gross, not only on card payments
+    assert m["vat"] > 0
+    assert m["net"] < m["gross"]

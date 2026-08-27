@@ -6,6 +6,9 @@ from app.core.security import get_current_user
 from app.models.booking import Booking
 from app.schemas import BookingCreate, BookingUpdate, BookingOut
 from app.services import booking_service
+from app.core.logging import get_logger
+
+log = get_logger(__name__)
 
 router = APIRouter(prefix="/api/bookings", tags=["bookings"])
 
@@ -88,6 +91,35 @@ def create_booking(payload: BookingCreate, db: Session = Depends(get_db),
     db.commit()
     db.refresh(b)
     return b
+
+
+@router.post("/{booking_id}/cash")
+def record_cash(booking_id: int, payload: dict, db: Session = Depends(get_db),
+                _=Depends(get_current_user)):
+    """Record cash collected on site. Marks the booking settled when the full
+    amount is in."""
+    b = db.get(Booking, booking_id)
+    if not b:
+        raise HTTPException(404, "Booking not found")
+    try:
+        amount = float(payload.get("amount") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Neispravan iznos.")
+    if amount < 0:
+        raise HTTPException(400, "Iznos ne može biti negativan.")
+    b.cash_collected = round(amount, 2)
+    b.cash_note = str(payload.get("note") or "")[:255]
+    # total settled = what came in online + what was collected in cash
+    settled = (b.amount_paid or 0) + b.cash_collected
+    if settled + 0.01 >= (b.total_price or 0):
+        b.payment_status = "paid"
+        if b.status == "pending":
+            b.status = "confirmed"
+    db.commit()
+    log.info("cash_recorded", booking_id=b.id, amount=b.cash_collected)
+    return {"ok": True, "cash_collected": b.cash_collected,
+            "payment_status": b.payment_status,
+            "balance": round(max((b.total_price or 0) - settled, 0), 2)}
 
 
 @router.get("/{booking_id}/detail")
