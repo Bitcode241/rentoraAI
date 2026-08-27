@@ -2350,3 +2350,100 @@ def test_cash_recording_and_money_overview(client, auth):
     # VAT is computed on gross, not only on card payments
     assert m["vat"] > 0
     assert m["net"] < m["gross"]
+
+
+def test_edit_booking_corrects_tour_and_price(client, auth):
+    """Owner can fix a booking after the fact: guest took 1h, not 2h."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.models.booking import Booking
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    jet = db.query(Asset).filter(Asset.asset_type == "jetski").first()
+    c = Customer(full_name="Fix Me", email="fix@example.com")
+    db.add(c); db.commit(); db.refresh(c)
+    now = datetime.now(timezone.utc)
+    b = Booking(asset_id=jet.id, customer_id=c.id, start_datetime=now,
+                end_datetime=now + timedelta(hours=2), total_price=250,
+                amount_paid=37.5, payment_status="deposit_paid",
+                status="confirmed", passengers=1, package_name="2h")
+    db.add(b); db.commit()
+    bid = b.id
+    db.close()
+    r = client.post(f"/api/bookings/{bid}/edit", headers=auth,
+                    json={"package_name": "1h", "duration_minutes": 60,
+                          "total_price": 150, "passengers": 2})
+    assert r.status_code == 200
+    assert r.json()["total_price"] == 150
+    db = SessionLocal()
+    b2 = db.get(Booking, bid)
+    assert b2.package_name == "1h"
+    assert b2.passengers == 2
+    assert (b2.end_datetime - b2.start_datetime).total_seconds() == 3600  # 1h
+    # still owes the difference
+    assert r.json()["balance"] == 112.5
+    db.close()
+
+
+def test_day_view_groups_and_totals(client, auth):
+    """Today view: one line per guest+slot, correct totals to collect."""
+    from app.core.database import SessionLocal
+    from app.models.tour_type import TourType
+    from app.api.routes.bookings import quick_booking
+    from app.core.timeutil import to_local
+    from datetime import datetime, timezone
+    db = SessionLocal()
+    t = db.query(TourType).filter(TourType.asset_type == "jetski").first()
+    today = to_local(datetime.now(timezone.utc)).date()
+    # one guest taking TWO jet skis at the same time
+    quick_booking({"tour_id": t.id, "qty": 2, "passengers": 4,
+                   "name": "Group Guest", "phone": "+385911111111",
+                   "start": f"{today}T11:00:00"}, db=db, _=None)
+    db.close()
+    r = client.get("/api/dashboard/day", headers=auth)
+    assert r.status_code == 200
+    d = r.json()
+    row = next(x for x in d["items"] if x["guest"] == "Group Guest")
+    assert row["units"] == 2          # grouped into ONE line
+    assert row["passengers"] == 4
+    assert row["total"] == (t.price or 0) * 2
+    assert d["to_collect"] >= row["balance"] > 0
+
+
+def test_free_slots_view(client, auth):
+    """Availability view answers 'is 11am free?' without opening the calendar."""
+    r = client.get("/api/dashboard/free?asset_type=jetski&days=3", headers=auth)
+    assert r.status_code == 200
+    d = r.json()
+    assert d["units"] > 0
+    assert len(d["days"]) == 3
+    day = d["days"][0]
+    assert day["slots"], "no hour slots returned"
+    for s in day["slots"]:
+        assert 0 <= s["free"] <= d["units"]
+        assert s["free"] + s["used"] <= d["units"] or s["used"] > 0
+
+
+def test_quick_booking_from_phone(client, auth):
+    """Quick booking creates confirmed bookings and blocks when units are gone."""
+    from app.core.database import SessionLocal
+    from app.models.tour_type import TourType
+    from app.core.timeutil import to_local
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    t = db.query(TourType).filter(TourType.asset_type == "jetski").first()
+    day = (to_local(datetime.now(timezone.utc)) + timedelta(days=4)).date()
+    db.close()
+    r = client.post("/api/bookings/quick", headers=auth,
+                    json={"tour_id": t.id, "qty": 2, "passengers": 3,
+                          "name": "Walk In", "phone": "+385922222222",
+                          "start": f"{day}T09:00:00"})
+    assert r.status_code == 200
+    assert r.json()["count"] == 2
+    # asking for more units than exist at the same slot must fail cleanly
+    r2 = client.post("/api/bookings/quick", headers=auth,
+                     json={"tour_id": t.id, "qty": 99, "passengers": 2,
+                           "name": "Too Many", "phone": "+385933333333",
+                           "start": f"{day}T09:00:00"})
+    assert r2.status_code == 409

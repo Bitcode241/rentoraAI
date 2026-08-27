@@ -1,11 +1,13 @@
 const API = '';
 let TOKEN = '';
 let DASH = null;
-const PAGES = ['Dashboard','Calendar','Assets','Tours','Transfers','Add-ons','Widget','Bookings','Novac','Izvori','Customers','Email Inbox','Mail Settings',
+const PAGES = ['Danas','Slobodno','Dashboard','Calendar','Assets','Tours','Transfers','Add-ons','Widget','Bookings','Novac','Izvori','Customers','Email Inbox','Mail Settings',
   'Settings',
   'Revenue Overview','Upcoming Reservations',
   "Today's Reservations",'Recent Conversations'];
 const SUBS = {
+  'Danas':'Tko dolazi, kada, koliko naplatiti',
+  'Slobodno':'Koliko je jetova slobodno po satu',
   'Dashboard':'Live operational overview',
   'Novac':'Koliko je ušlo i koliko ti stvarno ostaje',
   'Izvori':'Odakle dolaze gosti (Google Ads, WhatsApp...)',
@@ -56,7 +58,7 @@ function boot(){
   const nav = document.getElementById('nav');
   nav.innerHTML = PAGES.map(p=>`<a data-p="${p.replace(/"/g,'&quot;')}"><span class="dot"></span>${p}</a>`).join('');
   nav.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>go(a.dataset.p)));
-  go('Dashboard');
+  go('Danas');
 }
 function setActive(p){ document.querySelectorAll('#nav a').forEach(a=>
   a.classList.toggle('active', a.dataset.p===p)); }
@@ -139,6 +141,88 @@ const RENDER = {
       <td class="row-actions"><button class="btn btn-sm btn-ghost" onclick="radiusModal(${r.id})">Uredi</button>
       <button class="btn btn-sm btn-ghost" onclick="delRadius(${r.id})">Obriši</button></td></tr>`).join('')
       ||'<tr><td colspan=6 class="empty">Nema GPS zona — dodaj prvu</td></tr>'}</tbody></table></div>`;
+  },
+  'Danas': async (v)=>{
+    const q=(window.__dayDate||'');
+    const d=await api('/api/dashboard/day'+(q?('?date='+q):''));
+    const shift=(n)=>{ const dt=new Date((window.__dayDate||d.date)+'T12:00:00');
+      dt.setDate(dt.getDate()+n); window.__dayDate=dt.toISOString().slice(0,10); go('Danas'); };
+    window.__dayShift=shift;
+    const isToday = d.date === new Date().toISOString().slice(0,10);
+    v.innerHTML=`
+      <div class="toolbar" style="justify-content:space-between;align-items:center">
+        <div style="display:flex;gap:6px;align-items:center">
+          <button class="btn btn-sm btn-ghost" onclick="__dayShift(-1)">‹</button>
+          <b style="font-size:15px">${isToday?'Danas':new Date(d.date+'T12:00:00').toLocaleDateString('hr-HR',{weekday:'long',day:'numeric',month:'long'})}</b>
+          <button class="btn btn-sm btn-ghost" onclick="__dayShift(1)">›</button>
+          ${!isToday?`<button class="btn btn-sm btn-ghost" onclick="window.__dayDate='';go('Danas')">Danas</button>`:''}
+        </div>
+        <button class="btn btn-sm" onclick="quickBookModal()">+ Brza rezervacija</button>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+        <div class="panel" style="flex:1;min-width:120px;padding:14px">
+          <div style="font-size:11px;color:var(--mut);text-transform:uppercase">Termina</div>
+          <div style="font-size:24px;font-weight:800">${d.count}</div></div>
+        <div class="panel" style="flex:1;min-width:120px;padding:14px">
+          <div style="font-size:11px;color:var(--mut);text-transform:uppercase">Gostiju</div>
+          <div style="font-size:24px;font-weight:800">${d.guests}</div></div>
+        <div class="panel" style="flex:1;min-width:120px;padding:14px">
+          <div style="font-size:11px;color:var(--mut);text-transform:uppercase">Za naplatiti</div>
+          <div style="font-size:24px;font-weight:800;color:${d.to_collect>0?'#b06f00':'var(--good)'}">${money(d.to_collect)}</div></div>
+      </div>
+      ${!d.items.length?'<div class="panel"><div class="empty">Nema termina za ovaj dan.</div></div>':
+        `<div class="bk-list">${d.items.map(x=>{
+          const wa=(x.phone||'').replace(/[^0-9]/g,'');
+          return `<article class="bk" onclick="openDetail(${x.id})">
+            <header class="bk-top">
+              <div class="bk-who">
+                <div class="bk-name">${fmtTime(x.time)} · ${x.guest}</div>
+                <div class="bk-sub">${x.units>1?x.units+'× jet':x.asset} · ${x.tour||'—'} · ${x.passengers} os.</div>
+              </div>
+              <div class="bk-when">
+                <div class="bk-date" style="color:${x.balance>0?'#b06f00':'var(--good)'}">
+                  ${x.balance>0?money(x.balance):'✓'}</div>
+                <div class="bk-time">${x.balance>0?'naplatiti':'plaćeno'}</div>
+              </div>
+            </header>
+            ${x.pickup?`<div style="font-size:12.5px;color:var(--mut);margin-top:8px">📍 ${x.pickup}</div>`:''}
+            <footer class="bk-foot">
+              <div class="bk-tags">${payTag(x.payment_status)}</div>
+              <div class="bk-acts" onclick="event.stopPropagation()">
+                ${wa?`<a class="ic" title="WhatsApp" target="_blank" href="https://wa.me/${wa}">✆</a>`:''}
+                ${x.phone?`<a class="ic" title="Nazovi" href="tel:${x.phone}">☎</a>`:''}
+                ${x.balance>0?`<button class="ic" title="Naplati gotovinom" onclick="recordCash(${x.id},${x.balance})">€</button>`:''}
+              </div>
+            </footer>
+          </article>`;
+        }).join('')}</div>`}`;
+  },
+  'Slobodno': async (v)=>{
+    const d=await api('/api/dashboard/free?asset_type=jetski&days=10');
+    v.innerHTML=`
+      <p style="color:var(--mut);font-size:13px;margin-top:0">Koliko je jetova slobodno po satu — za brzi odgovor na upit. Ukupno ${d.units} jedinica.</p>
+      ${d.days.map(day=>{
+        const dt=new Date(day.date+'T12:00:00');
+        const label=dt.toLocaleDateString('hr-HR',{weekday:'short',day:'numeric',month:'short'});
+        return `<div class="panel" style="padding:12px 14px;margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <b style="font-size:14px">${label}</b>
+            <span style="font-size:12px;color:${day.fully_free?'var(--good)':'var(--mut)'}">
+              ${day.fully_free?'sve slobodno':'zauzeto max '+day.peak_used+'/'+d.units}</span>
+          </div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap">
+            ${day.slots.map(s=>{
+              const pct=s.free/d.units;
+              const bg=s.free===0?'#f8d7da':pct<=0.34?'#fff3cd':'#e8f5ee';
+              const col=s.free===0?'#842029':pct<=0.34?'#7a5b00':'#0f5132';
+              return `<div title="${s.free} slobodno" style="min-width:44px;text-align:center;
+                background:${bg};color:${col};border-radius:6px;padding:5px 4px;font-size:11px">
+                <div style="font-weight:700">${String(s.hour).padStart(2,'0')}</div>
+                <div style="font-size:13px;font-weight:800">${s.free}</div></div>`;
+            }).join('')}
+          </div>
+        </div>`;
+      }).join('')}`;
   },
   'Novac': async (v)=>{
     const d = await api('/api/dashboard/money?days=30');
@@ -1396,12 +1480,137 @@ async function openDetail(id){
 
       <div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap">
         ${m.balance>0?`<button class="btn btn-sm" onclick="recordCash(${d.id},${m.balance})">Naplaćeno u gotovini</button>`:''}
+        <button class="btn btn-sm btn-ghost" onclick="editBooking(${d.id})">Uredi rezervaciju</button>
         ${wa?`<a class="btn btn-sm btn-ghost" href="https://wa.me/${wa}" target="_blank" style="text-decoration:none">WhatsApp gostu</a>`:''}
         ${g.phone?`<a class="btn btn-sm btn-ghost" href="tel:${g.phone}" style="text-decoration:none">Nazovi</a>`:''}
         <button class="btn btn-sm btn-ghost" onclick="openVoucher(${d.id})">Voucher</button>
         <button class="btn btn-ghost" onclick="closeModal()">Zatvori</button>
       </div>`);
   }catch(e){ alert(e.message||'Greška'); }
+}
+
+async function quickBookModal(){
+  let tours=[];
+  try{ tours=await api('/api/tours?asset_type=jetski'); }catch(e){}
+  const now=new Date(); now.setMinutes(0,0,0); now.setHours(now.getHours()+1);
+  const p=n=>String(n).padStart(2,'0');
+  const def=`${now.getFullYear()}-${p(now.getMonth()+1)}-${p(now.getDate())}T${p(now.getHours())}:00`;
+  openModal(`
+    <h3 style="margin-top:0">Brza rezervacija</h3>
+    <p style="color:var(--mut);font-size:13px;margin-top:0">Za goste dogovorene na WhatsAppu ili na licu mjesta.</p>
+    <label>Tura</label>
+    <select id="qb_tour">${tours.map(t=>
+      `<option value="${t.id}">${t.name} · ${t.duration_minutes} min · ${t.price} €</option>`).join('')}</select>
+    <label>Kada</label>
+    <input id="qb_start" type="datetime-local" value="${def}">
+    <div style="display:flex;gap:10px">
+      <div style="flex:1"><label>Koliko jetova</label>
+        <input id="qb_qty" type="number" min="1" max="6" value="1"></div>
+      <div style="flex:1"><label>Ukupno osoba</label>
+        <input id="qb_pax" type="number" min="1" value="1"></div>
+    </div>
+    <label>Ime gosta</label>
+    <input id="qb_name" placeholder="Ime i prezime">
+    <label>Telefon (s pozivnim)</label>
+    <input id="qb_phone" placeholder="+385 91 234 5678">
+    <label>Email (nije obavezno)</label>
+    <input id="qb_email" placeholder="gost@email.com">
+    <div id="qb_msg" style="font-size:13px;margin-top:8px"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn" onclick="saveQuickBooking()">Spremi rezervaciju</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Odustani</button>
+    </div>`);
+}
+
+async function saveQuickBooking(){
+  const msg=document.getElementById('qb_msg');
+  const body={
+    tour_id:+val('qb_tour'),
+    start:val('qb_start')+':00',
+    qty:+val('qb_qty')||1,
+    passengers:+val('qb_pax')||1,
+    name:val('qb_name'),
+    phone:val('qb_phone'),
+    email:val('qb_email'),
+  };
+  if(!body.name && !body.phone){
+    if(msg){ msg.style.color='var(--bad)'; msg.textContent='Upiši barem ime ili broj.'; } return;
+  }
+  if(msg){ msg.style.color='var(--mut)'; msg.textContent='Spremam…'; }
+  try{
+    const r=await api('/api/bookings/quick',{method:'POST',body:JSON.stringify(body)});
+    if(msg){ msg.style.color='var(--good)';
+      msg.textContent=`Spremljeno: ${r.count}× ${r.tour} · ${r.total} €`; }
+    setTimeout(()=>{ closeModal(); go('Danas'); }, 700);
+  }catch(e){ if(msg){ msg.style.color='var(--bad)'; msg.textContent=e.message||'Greška'; } }
+}
+
+async function editBooking(id){
+  try{
+    const d=await api('/api/bookings/'+id+'/detail');
+    const w=d.what||{}, m=d.money||{};
+    let tours=[];
+    try{ tours=await api('/api/tours?asset_type='+(w.asset_type||'jetski')); }catch(e){}
+    const startLocal=(()=>{ if(!w.start) return '';
+      const dt=new Date(w.start); const p=n=>String(n).padStart(2,'0');
+      return `${dt.getFullYear()}-${p(dt.getMonth()+1)}-${p(dt.getDate())}T${p(dt.getHours())}:${p(dt.getMinutes())}`;
+    })();
+    openModal(`
+      <h3 style="margin-top:0">Uredi rezervaciju #${id}</h3>
+      <p style="color:var(--mut);font-size:13px;margin-top:0">Ispravi ako je gost uzeo drugu turu, kraće/duže, ili drugi broj osoba.</p>
+      <label>Tura</label>
+      <select id="eb_tour" onchange="ebTourPick()">
+        <option value="">— zadrži: ${w.package_name||'—'} —</option>
+        ${tours.map(t=>`<option value="${t.id}" data-name="${(t.name||'').replace(/"/g,'&quot;')}"
+           data-min="${t.duration_minutes}" data-price="${t.price}">${t.name} · ${t.duration_minutes} min · ${t.price} €</option>`).join('')}
+      </select>
+      <label>Trajanje (minuta)</label>
+      <input id="eb_min" type="number" min="0" step="15" placeholder="npr. 60" value="${w.start&&w.end?Math.round((new Date(w.end)-new Date(w.start))/60000):''}">
+      <label>Broj osoba</label>
+      <input id="eb_pax" type="number" min="1" value="${w.passengers||1}">
+      <label>Početak</label>
+      <input id="eb_start" type="datetime-local" value="${startLocal}">
+      <label>Ukupna cijena (€)</label>
+      <input id="eb_price" type="number" min="0" step="1" value="${m.total||0}">
+      <div style="font-size:12px;color:var(--mut);margin-top:6px">
+        Već naplaćeno: <b>${money(m.paid)}</b>. Ako smanjiš cijenu ispod toga, rezervacija se označi kao plaćena.</div>
+      <div id="eb_msg" style="font-size:13px;margin-top:8px"></div>
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button class="btn" onclick="saveBookingEdit(${id})">Spremi</button>
+        <button class="btn btn-ghost" onclick="openDetail(${id})">Odustani</button>
+      </div>`);
+  }catch(e){ alert(e.message||'Greška'); }
+}
+
+function ebTourPick(){
+  const s=document.getElementById('eb_tour');
+  const o=s.options[s.selectedIndex];
+  if(!o || !o.value) return;
+  const min=o.getAttribute('data-min'), price=o.getAttribute('data-price');
+  const pax=+(document.getElementById('eb_pax').value||1);
+  if(min) document.getElementById('eb_min').value=min;
+  // price is per unit; multiply by how many units this booking covers is not known
+  // here, so we set the catalog price and let the owner adjust if needed
+  if(price) document.getElementById('eb_price').value=price;
+}
+
+async function saveBookingEdit(id){
+  const msg=document.getElementById('eb_msg');
+  const sel=document.getElementById('eb_tour');
+  const opt=sel.options[sel.selectedIndex];
+  const body={
+    passengers:+document.getElementById('eb_pax').value||1,
+    duration_minutes:+document.getElementById('eb_min').value||0,
+    total_price:+document.getElementById('eb_price').value||0,
+  };
+  if(opt && opt.value) body.package_name=opt.getAttribute('data-name');
+  const st=document.getElementById('eb_start').value;
+  if(st) body.start=st+':00';
+  try{
+    const r=await api('/api/bookings/'+id+'/edit',{method:'POST',body:JSON.stringify(body)});
+    if(msg){ msg.style.color='var(--good)'; msg.textContent='Spremljeno ✓'; }
+    setTimeout(()=>{ closeModal(); go('Bookings'); }, 500);
+  }catch(e){ if(msg){ msg.style.color='var(--bad)'; msg.textContent=e.message||'Greška'; } }
 }
 
 async function recordCash(id, suggested){

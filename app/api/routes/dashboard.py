@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
@@ -12,6 +12,167 @@ router = APIRouter(tags=["dashboard"])
 @router.get("/admin", include_in_schema=False)
 def admin():
     return FileResponse("app/static/admin.html", media_type="text/html")
+
+
+@router.get("/api/dashboard/free")
+def dashboard_free(asset_type: str = "jetski", days: int = 10,
+                   db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Per-day availability for the next `days` days — how many units are free in
+    each hour slot, so a WhatsApp question can be answered in seconds."""
+    from datetime import datetime, timedelta
+    from app.models.booking import Booking
+    from app.models.asset import Asset
+    from app.core.timeutil import to_local, local_to_utc
+    from app.services import settings_service
+
+    units = (db.query(Asset)
+             .filter(Asset.asset_type == asset_type,
+                     Asset.active == True,  # noqa: E712
+                     Asset.out_of_service == False)  # noqa: E712
+             .all())
+    total_units = len(units)
+    unit_ids = [u.id for u in units]
+    if not unit_ids:
+        return {"asset_type": asset_type, "units": 0, "days": []}
+
+    try:
+        open_h = int(settings_service.get(db, "open_hour", "8") or 8)
+        close_h = int(settings_service.get(db, "close_hour", "20") or 20)
+    except (TypeError, ValueError):
+        open_h, close_h = 8, 20
+
+    today_local = to_local(datetime.now(timezone.utc)).date()
+    win_start = local_to_utc(datetime.combine(today_local, datetime.min.time()))
+    win_end = win_start + timedelta(days=days)
+    bookings = (db.query(Booking)
+                .filter(Booking.asset_id.in_(unit_ids),
+                        Booking.start_datetime < win_end,
+                        Booking.end_datetime > win_start,
+                        Booking.status != "cancelled")
+                .all())
+
+    def _aware(dt):
+        """DB rows can come back naive; treat those as UTC so comparisons work."""
+        if dt is None:
+            return None
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+    out = []
+    for d in range(days):
+        day = today_local + timedelta(days=d)
+        slots = []
+        busiest = 0
+        for h in range(open_h, close_h):
+            slot_start = local_to_utc(datetime.combine(day, datetime.min.time())
+                                      + timedelta(hours=h))
+            slot_end = slot_start + timedelta(hours=1)
+            ss, se = _aware(slot_start), _aware(slot_end)
+            used = sum(1 for b in bookings
+                       if _aware(b.start_datetime) < se
+                       and _aware(b.end_datetime) > ss)
+            busiest = max(busiest, used)
+            slots.append({"hour": h, "free": max(total_units - used, 0),
+                          "used": used})
+        out.append({
+            "date": day.isoformat(),
+            "weekday": day.strftime("%a"),
+            "slots": slots,
+            "fully_free": busiest == 0,
+            "peak_used": busiest,
+        })
+    return {"asset_type": asset_type, "units": total_units, "days": out}
+
+
+@router.get("/api/dashboard/day")
+def dashboard_day(date: str = "", db: Session = Depends(get_db),
+                  _=Depends(get_current_user)):
+    """Everything for one day: who's coming, when, how much to collect, phone.
+    Defaults to today (Croatian time)."""
+    from datetime import datetime, timedelta
+    from app.models.booking import Booking
+    from app.models.customer import Customer
+    from app.models.asset import Asset
+    from app.core.timeutil import to_local, local_to_utc
+
+    if date:
+        try:
+            day = datetime.strptime(date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(400, "Neispravan datum (očekujem YYYY-MM-DD).")
+    else:
+        day = to_local(datetime.now(timezone.utc)).date()
+
+    start = local_to_utc(datetime.combine(day, datetime.min.time()))
+    end = start + timedelta(days=1)
+    rows = (db.query(Booking)
+            .filter(Booking.start_datetime >= start,
+                    Booking.start_datetime < end,
+                    Booking.status != "cancelled")
+            .order_by(Booking.start_datetime)
+            .all())
+    cust_ids = {b.customer_id for b in rows if b.customer_id}
+    asset_ids = {b.asset_id for b in rows if b.asset_id}
+    customers = {c.id: c for c in db.query(Customer).filter(
+        Customer.id.in_(cust_ids)).all()} if cust_ids else {}
+    assets = {a.id: a for a in db.query(Asset).filter(
+        Asset.id.in_(asset_ids)).all()} if asset_ids else {}
+
+    items, to_collect, guests_total = [], 0.0, 0
+    groups = {}
+    for b in rows:
+        c = customers.get(b.customer_id)
+        a = assets.get(b.asset_id)
+        settled = (b.amount_paid or 0) + (getattr(b, "cash_collected", 0) or 0)
+        balance = round(max((b.total_price or 0) - settled, 0), 2)
+        to_collect += balance
+        guests_total += getattr(b, "passengers", 0) or 0
+        name = (c.full_name or "").strip() if c else ""
+        if name and "@" in name and name == (c.email or ""):
+            name = ""
+        # one guest taking several units at the same time is ONE line
+        key = (b.customer_id, b.start_datetime, b.package_name)
+        if key in groups:
+            g = groups[key]
+            g["units"] += 1
+            g["passengers"] += getattr(b, "passengers", 0) or 0
+            g["total"] += b.total_price or 0
+            g["paid"] += settled
+            g["balance"] += balance
+            g["ids"].append(b.id)
+            if balance > 0:
+                g["payment_status"] = b.payment_status
+            continue
+        groups[key] = {
+            "id": b.id,
+            "ids": [b.id],
+            "units": 1,
+            "time": b.start_datetime,
+            "guest": name or "Gost",
+            "phone": (c.phone if c else "") or "",
+            "email": (c.email if c else "") or "",
+            "asset": (a.name if a else "") or f"#{b.asset_id}",
+            "tour": b.package_name or "",
+            "passengers": getattr(b, "passengers", 0) or 0,
+            "total": round(b.total_price or 0, 2),
+            "paid": round(settled, 2),
+            "balance": balance,
+            "pickup": getattr(b, "pickup_location", "") or "",
+            "status": b.status,
+            "payment_status": b.payment_status,
+        }
+    for g in groups.values():
+        g["total"] = round(g["total"], 2)
+        g["paid"] = round(g["paid"], 2)
+        g["balance"] = round(g["balance"], 2)
+        items.append(g)
+    items.sort(key=lambda x: x["time"])
+    return {
+        "date": day.isoformat(),
+        "count": len(items),
+        "guests": guests_total,
+        "to_collect": round(to_collect, 2),
+        "items": items,
+    }
 
 
 @router.get("/api/dashboard/money")

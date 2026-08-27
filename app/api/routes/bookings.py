@@ -93,6 +93,158 @@ def create_booking(payload: BookingCreate, db: Session = Depends(get_db),
     return b
 
 
+@router.post("/quick")
+def quick_booking(payload: dict, db: Session = Depends(get_db),
+                  _=Depends(get_current_user)):
+    """Create a booking in seconds from the phone: tour + when + guest name/phone.
+    Used for guests agreed on WhatsApp or walk-ins."""
+    from datetime import timedelta
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.models.tour_type import TourType
+    from app.ai.tools import _parse
+
+    tour_id = payload.get("tour_id")
+    asset_type = (payload.get("asset_type") or "jetski").strip()
+    qty = max(1, int(payload.get("qty") or 1))
+    passengers = max(1, int(payload.get("passengers") or 1))
+    name = (payload.get("name") or "").strip()
+    phone = (payload.get("phone") or "").strip()
+    email = (payload.get("email") or "").strip()
+    if not name and not phone:
+        raise HTTPException(400, "Upiši barem ime ili broj telefona.")
+    if not payload.get("start"):
+        raise HTTPException(400, "Upiši datum i vrijeme.")
+    try:
+        start = _parse(str(payload["start"]))
+    except Exception:
+        raise HTTPException(400, "Neispravan datum/vrijeme.")
+
+    tour = db.get(TourType, int(tour_id)) if tour_id else None
+    if not tour:
+        raise HTTPException(400, "Odaberi turu.")
+    end = start + timedelta(minutes=tour.duration_minutes or 60)
+
+    # find free units of this type for the slot
+    units = (db.query(Asset)
+             .filter(Asset.asset_type == (tour.asset_type or asset_type),
+                     Asset.active == True,  # noqa: E712
+                     Asset.out_of_service == False)  # noqa: E712
+             .all())
+    free = []
+    for u in units:
+        clash = (db.query(Booking)
+                 .filter(Booking.asset_id == u.id,
+                         Booking.start_datetime < end,
+                         Booking.end_datetime > start,
+                         Booking.status != "cancelled")
+                 .first())
+        if not clash:
+            free.append(u)
+        if len(free) >= qty:
+            break
+    if len(free) < qty:
+        raise HTTPException(409, f"Nema dovoljno slobodnih jedinica "
+                                 f"({len(free)} od {qty}) u tom terminu.")
+
+    cust = None
+    if email:
+        cust = db.query(Customer).filter(Customer.email == email).first()
+    if not cust and phone:
+        cust = db.query(Customer).filter(Customer.phone == phone).first()
+    if not cust:
+        cust = Customer(full_name=name or phone, email=email or "",
+                        phone=phone or "")
+        db.add(cust)
+        db.commit()
+        db.refresh(cust)
+    else:
+        if name:
+            cust.full_name = name
+        if phone:
+            cust.phone = phone
+        db.commit()
+
+    created = []
+    per_unit_pax = max(1, passengers // qty) if qty else passengers
+    for u in free[:qty]:
+        b = Booking(asset_id=u.id, customer_id=cust.id,
+                    start_datetime=start, end_datetime=end,
+                    total_price=tour.price or 0,
+                    deposit_amount=round((tour.price or 0) *
+                                         (tour.deposit_percent or 30) / 100.0, 2),
+                    payment_status="unpaid", status="confirmed",
+                    passengers=per_unit_pax, package_name=tour.name,
+                    source="admin", tour_type_id=tour.id)
+        db.add(b)
+        db.commit()
+        created.append(b.id)
+    log.info("quick_booking_created", ids=created, tour=tour.name, qty=qty)
+    return {"ok": True, "booking_ids": created, "count": len(created),
+            "total": round((tour.price or 0) * qty, 2),
+            "tour": tour.name, "customer_id": cust.id}
+
+
+@router.post("/{booking_id}/edit")
+def edit_booking(booking_id: int, payload: dict, db: Session = Depends(get_db),
+                 _=Depends(get_current_user)):
+    """Correct a booking after the fact — the guest took a different tour, a
+    shorter/longer one, or a different number of people than they booked."""
+    from datetime import timedelta
+    b = db.get(Booking, booking_id)
+    if not b:
+        raise HTTPException(404, "Booking not found")
+
+    if "package_name" in payload:
+        b.package_name = str(payload["package_name"] or "")[:120]
+    if "passengers" in payload:
+        try:
+            b.passengers = max(1, int(payload["passengers"]))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Neispravan broj osoba.")
+    if "duration_minutes" in payload and payload["duration_minutes"]:
+        try:
+            mins = int(payload["duration_minutes"])
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Neispravno trajanje.")
+        if mins > 0 and b.start_datetime:
+            b.end_datetime = b.start_datetime + timedelta(minutes=mins)
+    if "start" in payload and payload["start"]:
+        from app.ai.tools import _parse
+        try:
+            new_start = _parse(str(payload["start"]))
+        except Exception:
+            raise HTTPException(400, "Neispravan datum/vrijeme.")
+        dur = None
+        if b.start_datetime and b.end_datetime:
+            dur = b.end_datetime - b.start_datetime
+        b.start_datetime = new_start
+        if dur:
+            b.end_datetime = new_start + dur
+    if "total_price" in payload:
+        try:
+            b.total_price = round(float(payload["total_price"]), 2)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Neispravna cijena.")
+    if "notes" in payload:
+        b.notes = str(payload["notes"] or "")[:2000]
+
+    # keep the payment status honest after a price change
+    settled = (b.amount_paid or 0) + (getattr(b, "cash_collected", 0) or 0)
+    total = b.total_price or 0
+    if settled <= 0:
+        b.payment_status = "unpaid" if b.payment_status != "awaiting_payment" else b.payment_status
+    elif settled + 0.01 >= total:
+        b.payment_status = "paid"
+    else:
+        b.payment_status = "deposit_paid"
+    db.commit()
+    log.info("booking_edited", booking_id=b.id, total=total, settled=settled)
+    return {"ok": True, "id": b.id, "total_price": b.total_price,
+            "payment_status": b.payment_status,
+            "balance": round(max(total - settled, 0), 2)}
+
+
 @router.post("/{booking_id}/cash")
 def record_cash(booking_id: int, payload: dict, db: Session = Depends(get_db),
                 _=Depends(get_current_user)):
