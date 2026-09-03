@@ -2514,3 +2514,109 @@ def test_payment_provider_switch_falls_back_safely():
     db.commit()
     assert ps.active_provider(db) == "stripe"
     db.close()
+
+
+def test_nav_is_grouped_and_has_no_duplicates():
+    """Sidebar: grouped, Croatian, every entry has a page that renders it."""
+    import re
+    js = open("app/static/app.js", encoding="utf-8").read()
+    assert "NAV_GROUPS" in js
+    # every nav item must have a matching RENDER entry, or it opens to an error
+    groups = re.search(r"const NAV_GROUPS = \[(.*?)\n\];", js, re.S).group(1)
+    items = re.findall(r"'([^']+)'", groups)
+    items = [i for i in items if i not in ("", "Novac", "Ponuda", "Gosti", "Sustav")
+             or items.count(i) > 1]
+    renders = set(re.findall(r"\n  '([^']+)': async \(v\)=>", js))
+    nav_items = set(re.findall(r"items:\[([^\]]+)\]", groups))
+    all_items = []
+    for chunk in nav_items:
+        all_items += re.findall(r"'([^']+)'", chunk)
+    assert all_items, "no nav items found"
+    for it in all_items:
+        assert it in renders, f"nav item '{it}' has no page"
+    # no duplicates in the sidebar
+    assert len(all_items) == len(set(all_items)), "duplicate nav entries"
+
+
+def test_quick_booking_accepts_prepaid_deposit(client, auth):
+    """Manual booking: enter what the guest already paid, system computes the rest."""
+    from app.core.database import SessionLocal
+    from app.models.tour_type import TourType
+    from app.models.booking import Booking
+    from app.core.timeutil import to_local
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    t = db.query(TourType).filter(TourType.asset_type == "jetski").first()
+    price, tid = t.price or 0, t.id
+    day = (to_local(datetime.now(timezone.utc)) + timedelta(days=6)).date()
+    db.close()
+    r = client.post("/api/bookings/quick", headers=auth,
+                    json={"tour_id": tid, "qty": 2, "passengers": 4,
+                          "name": "Deposit Guest", "phone": "+385944444444",
+                          "start": f"{day}T12:00:00",
+                          "paid": 50, "pay_method": "cash"})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["total"] == price * 2
+    assert d["paid"] == 50
+    assert d["balance"] == round(price * 2 - 50, 2)   # the rest, computed
+    db = SessionLocal()
+    for bid in d["booking_ids"]:
+        b = db.get(Booking, bid)
+        assert b.cash_collected == 25          # 50 split across 2 units
+        assert b.payment_status == "deposit_paid"
+    db.close()
+    # paying more than the total is refused
+    r2 = client.post("/api/bookings/quick", headers=auth,
+                     json={"tour_id": tid, "qty": 1, "passengers": 1,
+                           "name": "Too Much", "phone": "+385955555555",
+                           "start": f"{day}T15:00:00", "paid": price + 500})
+    assert r2.status_code == 400
+
+
+def test_partner_settlement_math(client, auth):
+    """Partner view shows what passed through my hands and is owed onward."""
+    from app.core.database import SessionLocal
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.models.booking import Booking
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    # dedicated asset so other tests' bookings don't leak into the totals
+    boat = Asset(name="Partner Test Boat", asset_type="boat", capacity=8,
+                 active=True, provider_type="partner",
+                 provider_name="Test Partner", my_commission=100.0)
+    db.add(boat); db.commit(); db.refresh(boat)
+    c = Customer(full_name="P Guest", email="p@example.com")
+    db.add(c); db.commit(); db.refresh(c)
+    now = datetime.now(timezone.utc)
+    # guest paid me everything
+    b1 = Booking(asset_id=boat.id, customer_id=c.id,
+                 start_datetime=now - timedelta(days=2),
+                 end_datetime=now - timedelta(days=2, hours=-4),
+                 total_price=500, amount_paid=150, cash_collected=350,
+                 payment_status="paid", status="confirmed",
+                 passengers=6, package_name="Elafiti")
+    # guest paid me only the deposit
+    b2 = Booking(asset_id=boat.id, customer_id=c.id,
+                 start_datetime=now - timedelta(days=1),
+                 end_datetime=now - timedelta(days=1, hours=-4),
+                 total_price=500, amount_paid=150, cash_collected=0,
+                 payment_status="deposit_paid", status="confirmed",
+                 passengers=6, package_name="Elafiti")
+    db.add_all([b1, b2]); db.commit()
+    id1, id2 = b1.id, b2.id
+    db.close()
+    r = client.get("/api/dashboard/partners?days=90", headers=auth)
+    assert r.status_code == 200
+    p = next(x for x in r.json()["partners"] if x["partner"] == "Test Partner")
+    assert p["my_commission"] == 200          # 100 per booking
+    assert p["partner_share"] == 800          # 400 per booking
+    assert p["owed"] == 450                   # 400 + 50 actually held by me
+    # settling removes it from what's owed
+    s = client.post("/api/dashboard/partners/settle", headers=auth,
+                    json={"booking_ids": [id1], "settled": True})
+    assert s.json()["updated"] == 1
+    r2 = client.get("/api/dashboard/partners?days=90", headers=auth)
+    p2 = next(x for x in r2.json()["partners"] if x["partner"] == "Test Partner")
+    assert p2["owed"] == 50                   # only the unsettled one remains

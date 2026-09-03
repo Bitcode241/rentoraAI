@@ -47,12 +47,25 @@
   .brand{font-family:'Fraunces',serif;font-size:22px;font-weight:700;line-height:1.1;margin-bottom:2px}
   .brand small{display:block;font-family:'IBM Plex Mono';font-size:10px;letter-spacing:2px;
     color:var(--aqua);margin-top:6px;text-transform:uppercase}
-  nav{margin-top:30px;display:flex;flex-direction:column;gap:2px}
-  nav a{color:#b7c4cb;text-decoration:none;padding:10px 13px;border-radius:3px;font-size:14px;
-    display:flex;align-items:center;gap:10px;transition:.12s;cursor:pointer}
+  nav{margin-top:26px;display:flex;flex-direction:column;gap:1px}
+  /* group heading, e.g. "Novac" — quiet, uppercase, separates the sections */
+  .nav-sec{color:#5f7480;font-size:10px;font-weight:700;letter-spacing:1.4px;
+    text-transform:uppercase;padding:16px 13px 6px;margin-top:6px;
+    border-top:1px solid rgba(255,255,255,.07)}
+  .nav-sec:first-child{border-top:none;margin-top:0}
+  nav a{color:#b7c4cb;text-decoration:none;padding:9px 13px;border-radius:6px;font-size:14px;
+    display:flex;align-items:center;gap:10px;transition:.12s;cursor:pointer;
+    position:relative}
   nav a:hover{background:rgba(255,255,255,.06);color:#fff}
-  nav a.active{background:var(--teal);color:#fff}
-  nav a .dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.5}
+  nav a.active{background:var(--teal);color:#fff;font-weight:600}
+  nav a.active .dot{opacity:1;background:var(--gold)}
+  nav a .dot{width:5px;height:5px;border-radius:50%;background:currentColor;opacity:.45;
+    flex-shrink:0;transition:.12s}
+  /* live counter badge (e.g. how many bookings today) */
+  nav a .badge{margin-left:auto;background:var(--gold);color:#0f2230;font-size:10px;
+    font-weight:800;min-width:18px;height:18px;border-radius:9px;display:grid;
+    place-items:center;padding:0 5px}
+  nav a.active .badge{background:#fff}
   main{padding:32px 38px;overflow:auto;max-height:100vh}
   header.top{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:26px}
   header.top h2{font-family:'Fraunces',serif;font-size:30px;font-weight:600}

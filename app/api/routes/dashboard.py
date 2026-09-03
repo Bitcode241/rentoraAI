@@ -14,6 +14,30 @@ def admin():
     return FileResponse("app/static/admin.html", media_type="text/html")
 
 
+@router.get("/api/dashboard/partners")
+def dashboard_partners(days: int = 90, db: Session = Depends(get_db),
+                       _=Depends(get_current_user)):
+    """What each partner earned and how much of it you still owe them."""
+    from app.services import partner_settlement
+    return partner_settlement.settlement_report(db, days)
+
+
+@router.post("/api/dashboard/partners/settle")
+def settle_partner(payload: dict, db: Session = Depends(get_db),
+                   _=Depends(get_current_user)):
+    """Mark bookings as paid out to the partner."""
+    from app.services import partner_settlement, audit
+    ids = payload.get("booking_ids") or []
+    settled = bool(payload.get("settled", True))
+    n = partner_settlement.mark_settled(db, ids, settled)
+    audit.record(db, "partner_settled" if settled else "partner_unsettled",
+                 actor=getattr(_, "username", "admin"), entity="booking",
+                 entity_id=",".join(str(i) for i in ids),
+                 detail=f"{'Isplaćeno' if settled else 'Poništena isplata'} "
+                        f"partneru — {n} rezervacija")
+    return {"ok": True, "updated": n}
+
+
 @router.get("/api/dashboard/log")
 def dashboard_log(limit: int = 100, entity: str = "", q: str = "",
                   db: Session = Depends(get_db), _=Depends(get_current_user)):

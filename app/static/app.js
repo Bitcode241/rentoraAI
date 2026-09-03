@@ -1,30 +1,34 @@
 const API = '';
 let TOKEN = '';
 let DASH = null;
-const PAGES = ['Danas','Slobodno','Dashboard','Calendar','Assets','Tours','Transfers','Add-ons','Widget','Bookings','Novac','Izvori','Customers','Email Inbox','Mail Settings',
-  'Settings','Log',
-  'Revenue Overview','Upcoming Reservations',
-  "Today's Reservations",'Recent Conversations'];
+// Navigation grouped the way the day actually runs: what's happening now,
+// then the money, then the things you set up once, then the system.
+const NAV_GROUPS = [
+  {label:'', items:['Danas','Slobodno','Kalendar','Rezervacije']},
+  {label:'Novac', items:['Novac','Partneri','Izvori']},
+  {label:'Ponuda', items:['Ture','Flota','Transferi','Dodaci','Widget']},
+  {label:'Gosti', items:['Gosti','Poruke']},
+  {label:'Sustav', items:['Postavke','Email računi','Log']},
+];
+const PAGES = NAV_GROUPS.flatMap(g=>g.items);
 const SUBS = {
   'Danas':'Tko dolazi, kada, koliko naplatiti',
-  'Log':'Sve promjene u sustavu — tvoja zaštita',
-  'Slobodno':'Koliko je jetova slobodno po satu',
-  'Dashboard':'Live operational overview',
+  'Slobodno':'Koliko je jedinica slobodno po satu',
+  'Kalendar':'Raspored po plovilima',
+  'Rezervacije':'Sve rezervacije, svi kanali',
   'Novac':'Koliko je ušlo i koliko ti stvarno ostaje',
+  'Partneri':'Koliko duguješ vlasnicima plovila',
   'Izvori':'Odakle dolaze gosti (Google Ads, WhatsApp...)',
-  'Tours':'Katalog tura — jedna tura, jedan ID',
-  'Assets':'Fleet — boats & jet skis',
-  'Transfers':'Pickup / drop-off zones & prices',
-  'Bookings':'All reservations across channels',
-  'Customers':'Customer profiles & history',
-  'Email Inbox':'Mail threads & detected intent',
-  'Mail Settings':'Email accounts the AI watches & replies from',
-  'Settings':'Pravila rezervacije (vrijeme unaprijed)',
-  'Calendar':'Visual schedule — bookings per vessel',
-  'Revenue Overview':'Earnings & deposits held',
-  'Upcoming Reservations':'Forward booking pipeline',
-  "Today's Reservations":'Departures & returns today',
-  'Recent Conversations':'Unified email + WhatsApp'
+  'Ture':'Katalog tura — jedna tura, jedan ID',
+  'Flota':'Brodovi i jetovi',
+  'Transferi':'Zone preuzimanja i cijene',
+  'Dodaci':'GoPro, gorivo, oprema…',
+  'Widget':'Kod za ugradnju na tvoj sajt',
+  'Gosti':'Profili gostiju i povijest',
+  'Poruke':'Mailovi gostiju i odgovori',
+  'Postavke':'Brendovi, lokacije, pravila, naplata',
+  'Email računi':'Sandučići koje AI prati',
+  'Log':'Sve promjene u sustavu — tvoja zaštita',
 };
 
 async function api(path, opts={}){
@@ -57,12 +61,36 @@ function boot(){
   document.getElementById('login').style.display='none';
   document.getElementById('shell').style.display='grid';
   const nav = document.getElementById('nav');
-  nav.innerHTML = PAGES.map(p=>`<a data-p="${p.replace(/"/g,'&quot;')}"><span class="dot"></span>${p}</a>`).join('');
+  nav.innerHTML = NAV_GROUPS.map(g=>
+    (g.label?`<div class="nav-sec">${g.label}</div>`:'') +
+    g.items.map(p=>`<a data-p="${p.replace(/"/g,'&quot;')}"><span class="dot"></span>${p}</a>`).join('')
+  ).join('');
   nav.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>go(a.dataset.p)));
   go('Danas');
+  refreshBadges();
+  setInterval(refreshBadges, 120000);   // refresh every 2 min
 }
 function setActive(p){ document.querySelectorAll('#nav a').forEach(a=>
   a.classList.toggle('active', a.dataset.p===p)); }
+
+async function refreshBadges(){
+  // small live counters so the sidebar shows what needs attention
+  const put=(page,n)=>{
+    const a=document.querySelector(`#nav a[data-p="${page}"]`);
+    if(!a) return;
+    const old=a.querySelector('.badge');
+    if(old) old.remove();
+    if(n>0) a.insertAdjacentHTML('beforeend',`<span class="badge">${n>99?'99+':n}</span>`);
+  };
+  try{
+    const d=await api('/api/dashboard/day');
+    put('Danas', d.count||0);
+  }catch(e){}
+  try{
+    const t=await api('/api/emails/threads');
+    put('Poruke', (t||[]).filter(x=>x.needs_reply).length);
+  }catch(e){}
+}
 
 function toggleNav(){ document.body.classList.toggle('nav-open'); }
 function closeNav(){ document.body.classList.remove('nav-open'); }
@@ -107,7 +135,7 @@ const RENDER = {
       <div id="dash-body"></div>`;
     dashTab('today');
   },
-  'Assets': async (v)=>{
+  'Flota': async (v)=>{
     const a = await api('/api/assets');
     v.innerHTML = `<div class="toolbar"><button class="btn btn-sm" onclick="assetModal()">+ New asset</button></div>
       <div class="panel"><table><thead><tr><th>Name</th><th>Type</th><th>Cap.</th>
@@ -121,7 +149,7 @@ const RENDER = {
       <td><button class="btn btn-sm btn-ghost" onclick="assetModal(${x.id})">Edit</button></td></tr>`).join('')
       ||'<tr><td colspan=8 class="empty">No assets yet</td></tr>'}</tbody></table></div>`;
   },
-  'Transfers': async (v)=>{
+  'Transferi': async (v)=>{
     const [z, radii] = await Promise.all([api('/api/transfers/zones'), api('/api/transfers/radii')]);
     v.innerHTML = `<div class="toolbar"><button class="btn btn-sm" onclick="zoneModal()">+ Nova zona (po imenu)</button>
       <span style="color:var(--mut);font-size:12px">Auto ≤3 · Kombi 4-8 · Kombi+Auto za 9+ · cijene su jednosmjerne</span></div>
@@ -260,6 +288,62 @@ const RENDER = {
           </div>`).join('')}
       </div>`}`;
   },
+  'Partneri': async (v)=>{
+    const d=await api('/api/dashboard/partners?days=90');
+    if(!d.partners.length){
+      v.innerHTML=`<div class="panel"><div class="empty">Nema partnerskih plovila.<br>
+        <span style="font-size:12px">Označi plovilo kao partnersko u Floti (vlasnik + provizija) pa će se ovdje voditi obračun.</span></div></div>`;
+      return;
+    }
+    v.innerHTML=`
+      <div class="panel" style="padding:16px;margin-bottom:16px;max-width:340px">
+        <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px">Ukupno dugujem partnerima</div>
+        <div style="font-size:28px;font-weight:800;color:${d.total_owed>0?'#b06f00':'var(--good)'}">${money(d.total_owed)}</div>
+        <div style="font-size:12px;color:var(--mut)">zadnjih ${d.days} dana</div>
+      </div>
+      ${d.partners.map(p=>`
+        <div class="panel" style="margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
+            <div>
+              <div style="font-weight:700;font-size:16px">${p.partner}</div>
+              <div style="font-size:12px;color:var(--mut)">${p.oib?('OIB '+p.oib+' · '):''}${p.bookings} rezervacija</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:11px;color:var(--mut);text-transform:uppercase">Dugujem</div>
+              <div style="font-size:22px;font-weight:800;color:${p.owed>0?'#b06f00':'var(--good)'}">${p.owed>0?money(p.owed):'✓'}</div>
+            </div>
+          </div>
+          <div class="bk-money" style="grid-template-columns:repeat(3,minmax(0,150px));margin:12px 0 10px">
+            <div class="bk-m"><span>Promet</span><b>${money(p.turnover)}</b></div>
+            <div class="bk-m ok"><span>Moja provizija</span><b>${money(p.my_commission)}</b></div>
+            <div class="bk-m"><span>Partnerov dio</span><b>${money(p.partner_share)}</b></div>
+          </div>
+          <details>
+            <summary style="cursor:pointer;font-size:13px;color:var(--teal)">Prikaži rezervacije (${p.items.length})</summary>
+            <table style="width:100%;margin-top:10px;font-size:13px">
+              <thead><tr style="text-align:left;color:var(--mut);font-size:11px">
+                <th>Datum</th><th>Tura</th><th>Ukupno</th><th>Provizija</th><th>Kod mene</th><th></th></tr></thead>
+              <tbody>${p.items.map(i=>`<tr style="border-top:1px solid var(--line)">
+                <td data-l="Datum">${fmtDay(i.date)}</td>
+                <td data-l="Tura">${i.tour||'—'}</td>
+                <td data-l="Ukupno">${money(i.total)}</td>
+                <td data-l="Provizija">${money(i.commission)}</td>
+                <td data-l="Kod mene"><b>${money(i.holding)}</b></td>
+                <td data-l="">${i.settled
+                  ? `<span style="color:var(--good);font-size:12px">isplaćeno ✓</span>
+                     <button class="btn btn-sm btn-ghost" onclick="settlePartner([${i.booking_id}],false)">poništi</button>`
+                  : `<button class="btn btn-sm" onclick="settlePartner([${i.booking_id}],true)">Označi isplaćeno</button>`}</td>
+              </tr>`).join('')}</tbody>
+            </table>
+            ${p.owed>0?`<button class="btn btn-sm" style="margin-top:10px"
+              onclick="settlePartner([${p.items.filter(i=>!i.settled).map(i=>i.booking_id).join(',')}],true)">
+              Označi sve isplaćeno (${money(p.owed)})</button>`:''}
+          </details>
+        </div>`).join('')}
+      <p style="font-size:12px;color:var(--mut);max-width:600px">
+        "Kod mene" = dio partnerove zarade koji je prošao kroz tvoje ruke (online depozit + gotovina koju si uzeo).
+        To je ono što mu trebaš proslijediti.</p>`;
+  },
   'Novac': async (v)=>{
     const d = await api('/api/dashboard/money?days=30');
     const line=(label,val,cls)=>`<div style="display:flex;justify-content:space-between;gap:14px;
@@ -331,7 +415,7 @@ const RENDER = {
       </div>
       <p style="font-size:12px;color:var(--mut);margin-top:12px">Izvor se bilježi kad gost dođe preko linka s <code>?utm_source=...</code> (npr. Google Ads, WhatsApp). Rezervacije bez izvora prikazuju se kao "Direct".</p>`;
   },
-  'Tours': async (v)=>{
+  'Ture': async (v)=>{
     const [tours, report] = await Promise.all([
       api('/api/tours?asset_type=jetski'),
       api('/api/tours/report?asset_type=jetski')]);
@@ -367,7 +451,7 @@ const RENDER = {
         </table>
       </div>`;
   },
-  'Add-ons': async (v)=>{
+  'Dodaci': async (v)=>{
     const a = await api('/api/addons');
     v.innerHTML = `<div class="toolbar"><button class="btn btn-sm" onclick="addonModal()">+ Novi add-on</button>
       <span style="color:var(--mut);font-size:12px">Dodaci koje gost može dodati uz rezervaciju (GoPro, gorivo, instruktor...)</span></div>
@@ -426,7 +510,7 @@ const RENDER = {
       <span id="wmsg" style="margin-left:12px;color:var(--good);font-size:13px"></span></div>
     </div>`;
   },
-  'Mail Settings': async (v)=>{
+  'Email računi': async (v)=>{
     const boxes = await api('/api/mailboxes');
     v.innerHTML = `<div class="toolbar"><button class="btn btn-sm" onclick="mailboxModal()">+ Add email account</button>
       <span style="color:var(--mut);font-size:12px">The AI watches these inboxes and replies from the SAME address that received the message.</span></div>
@@ -440,12 +524,12 @@ const RENDER = {
       <button class="btn btn-sm btn-ghost" onclick="delMailbox(${m.id})">Delete</button></td></tr>`).join('')
       ||'<tr><td colspan=6 class="empty">No email accounts yet — add one so the AI can answer mail</td></tr>'}</tbody></table></div>`;
   },
-  'Bookings': async (v)=>{
+  'Rezervacije': async (v)=>{
     const b = await api('/api/bookings');
     v.innerHTML = `<div class="toolbar"><button class="btn btn-sm" onclick="bookingModal()">+ Nova rezervacija</button></div>
       ${bookingTable(b,true)}`;
   },
-  'Settings': async (v)=>{
+  'Postavke': async (v)=>{
     const [lt, biz] = await Promise.all([api('/api/settings/lead-times'), api('/api/settings/business')]);
     v.innerHTML = `<div class="panel" style="max-width:520px">
       <h3 style="margin-top:0">Brendovi (što gosti vide)</h3>
@@ -530,7 +614,7 @@ const RENDER = {
     renderMeetingPoints();
     loadPushDevices();
   },
-  'Customers': async (v)=>{
+  'Gosti': async (v)=>{
     const c = await api('/api/customers');
     v.innerHTML = `<div class="toolbar"><button class="btn btn-sm" onclick="customerModal()">+ New customer</button></div>
       <div class="panel"><table><thead><tr><th>Name</th><th>Email</th><th>Phone</th>
@@ -540,7 +624,7 @@ const RENDER = {
       <td><button class="btn btn-sm btn-ghost" onclick="showConvo(${x.id},'${x.full_name}')">History</button></td></tr>`).join('')
       ||'<tr><td colspan=6 class="empty">No customers yet</td></tr>'}</tbody></table></div>`;
   },
-  'Email Inbox': async (v)=>{
+  'Poruke': async (v)=>{
     const t = await api('/api/emails/threads');
     const waiting = t.filter(x=>x.needs_reply).length;
     v.innerHTML = `<div class="toolbar">
@@ -567,7 +651,7 @@ const RENDER = {
           </div>
         </div>`).join('')}`;
   },
-  'Calendar': async (v)=>{
+  'Kalendar': async (v)=>{
     await renderCalendar(v, window._calStart);
   },
   'Revenue Overview': async (v)=>{
@@ -743,12 +827,12 @@ async function saveTour(id){
   try{
     if(id) await api('/api/tours/'+id,{method:'PUT',body:JSON.stringify(body)});
     else await api('/api/tours',{method:'POST',body:JSON.stringify(body)});
-    closeModal(); go('Tours');
+    closeModal(); go('Ture');
   }catch(e){ alert(e.message||'Greška pri spremanju'); }
 }
 async function delTour(id,name){
   if(!confirm('Obrisati turu "'+name+'"? Uklonit će se s ponude na svim jetovima.')) return;
-  try{ await api('/api/tours/'+id,{method:'DELETE'}); go('Tours'); }
+  try{ await api('/api/tours/'+id,{method:'DELETE'}); go('Ture'); }
   catch(e){ alert(e.message||'Greška'); }
 }
 async function pruneTours(){
@@ -756,7 +840,7 @@ async function pruneTours(){
   try{
     const r=await api('/api/tours/prune-orphans?asset_type=jetski',{method:'POST'});
     alert('Očišćeno zaostalih paketa: '+(r.removed||0));
-    go('Tours');
+    go('Ture');
   }catch(e){ alert(e.message||'Greška'); }
 }
 async function rebuildTours(){
@@ -764,7 +848,7 @@ async function rebuildTours(){
   try{
     const r=await api('/api/tours/rebuild?asset_type=jetski',{method:'POST'});
     alert('Usklađeno! '+(r.units||0)+' jetova × '+(r.tours||0)+' tura.');
-    go('Tours');
+    go('Ture');
   }catch(e){ alert(e.message||'Greška'); }
 }
 function tourEmbed(id, name, atype){
@@ -948,7 +1032,7 @@ async function saveAsset(id){
     boost_level:+val('m_boost')||0};
   try{ await api(id?'/api/assets/'+id:'/api/assets',
     {method:id?'PATCH':'POST',body:JSON.stringify(p)});
-    closeModal(); go('Assets'); }
+    closeModal(); go('Flota'); }
   catch(e){ document.getElementById('merr').textContent=e.message; }
 }
 async function customerModal(){
@@ -967,7 +1051,7 @@ async function saveCustomer(){
   try{ await api('/api/customers',{method:'POST',body:JSON.stringify({
     full_name:val('c_name'),email:val('c_email'),phone:val('c_phone'),
     country:val('c_country'),language:val('c_lang')||'en'})});
-    closeModal(); go('Customers'); }
+    closeModal(); go('Gosti'); }
   catch(e){ document.getElementById('merr').textContent=e.message; }
 }
 async function bookingModal(){
@@ -1075,14 +1159,14 @@ async function saveBooking(){
       payment_status: pm==='on_boat' ? 'pay_on_boat' : 'unpaid',
       start_datetime:new Date(val('b_start')).toISOString(),
       end_datetime:new Date(val('b_end')).toISOString(),source:'admin'})});
-    closeModal(); go('Bookings'); }
+    closeModal(); go('Rezervacije'); }
   catch(e){ document.getElementById('merr').textContent=e.message; }
 }
 function onPayModePick(){ /* reserved for future UI hints */ }
-async function confirmB(id){ try{ await api('/api/bookings/'+id+'/confirm',{method:'POST'}); go('Bookings'); }
+async function confirmB(id){ try{ await api('/api/bookings/'+id+'/confirm',{method:'POST'}); go('Rezervacije'); }
   catch(e){ alert(e.message); } }
 async function cancelB(id){ if(!confirm('Cancel booking #'+id+'?'))return;
-  await api('/api/bookings/'+id+'/cancel',{method:'POST'}); go('Bookings'); }
+  await api('/api/bookings/'+id+'/cancel',{method:'POST'}); go('Rezervacije'); }
 async function processInbox(){ try{ const r=await api('/api/emails/process',{method:'POST'});
   alert('Processed '+r.processed.length+' message(s)'); go('Email Inbox'); }catch(e){ alert(e.message); } }
 async function showConvo(id,name){
@@ -1113,11 +1197,11 @@ async function saveZone(id){
     active:true,sort_order:0};
   try{ await api(id?'/api/transfers/zones/'+id:'/api/transfers/zones',
     {method:id?'PATCH':'POST',body:JSON.stringify(p)});
-    closeModal(); go('Transfers'); }
+    closeModal(); go('Transferi'); }
   catch(e){ document.getElementById('merr').textContent=e.message; }
 }
 async function delZone(id){ if(!confirm('Delete this zone?'))return;
-  await api('/api/transfers/zones/'+id,{method:'DELETE'}); go('Transfers'); }
+  await api('/api/transfers/zones/'+id,{method:'DELETE'}); go('Transferi'); }
 
 async function radiusModal(id){
   let r = {label:'',base_label:'',max_km:10,car_price:0,van_price:0,service:'transfer'};
@@ -1141,11 +1225,11 @@ async function saveRadius(id){
   try{
     if(id) await api('/api/transfers/radii/'+id,{method:'PATCH',body:JSON.stringify(body)});
     else await api('/api/transfers/radii',{method:'POST',body:JSON.stringify(body)});
-    closeModal(); go('Transfers');
+    closeModal(); go('Transferi');
   }catch(e){ document.getElementById('rerr').textContent=e.message; }
 }
 async function delRadius(id){ if(!confirm('Obrisati ovu GPS zonu?'))return;
-  await api('/api/transfers/radii/'+id,{method:'DELETE'}); go('Transfers'); }
+  await api('/api/transfers/radii/'+id,{method:'DELETE'}); go('Transferi'); }
 
 async function addonModal(id){
   let a = {name:'',description:'',price:0,per_person:false,applies_to:'',active:true};
@@ -1177,11 +1261,11 @@ async function saveAddon(id){
   try{
     if(id) await api('/api/addons/'+id,{method:'PATCH',body:JSON.stringify(body)});
     else await api('/api/addons',{method:'POST',body:JSON.stringify(body)});
-    closeModal(); go('Add-ons');
+    closeModal(); go('Dodaci');
   }catch(e){ document.getElementById('aerr').textContent=e.message; }
 }
 async function delAddon(id){ if(!confirm('Obrisati ovaj add-on?'))return;
-  await api('/api/addons/'+id,{method:'DELETE'}); go('Add-ons'); }
+  await api('/api/addons/'+id,{method:'DELETE'}); go('Dodaci'); }
 
 async function saveAccents(){
   try{
@@ -1278,7 +1362,7 @@ async function renderCalendar(v, startISO){
 function calNav(deltaDays){
   if(deltaDays===0){ window._calStart=null; }
   else { const d = new Date(window._calStart||new Date()); d.setDate(d.getDate()+deltaDays); window._calStart=d.toISOString(); }
-  go('Calendar');
+  go('Kalendar');
 }
 async function openBookingFromCal(id){
   try{ const b = await api('/api/bookings/'+id);
@@ -1362,7 +1446,7 @@ async function sendConfirm(id){
 async function refundB(id){
   if(!confirm('Sigurno napraviti povrat depozita? Rezervacija će biti otkazana.'))return;
   try{ const r=await api('/api/payments/refund/'+id,{method:'POST'});
-    alert('Povrat napravljen: '+(r.amount||'')+' EUR'); go('Bookings');
+    alert('Povrat napravljen: '+(r.amount||'')+' EUR'); go('Rezervacije');
   }catch(e){ alert('Greška pri povratu: '+e.message); }
 }
 
@@ -1436,7 +1520,7 @@ async function editDeposit(id, current, silent){
   }
   try{
     await api('/api/bookings/'+id,{method:'PATCH',body:JSON.stringify({deposit_amount:v})});
-    if(!silent) go('Bookings');
+    if(!silent) go('Rezervacije');
   }catch(e){ alert(e.message); }
 }
 
@@ -1535,6 +1619,16 @@ async function openDetail(id){
   }catch(e){ alert(e.message||'Greška'); }
 }
 
+async function settlePartner(ids, settled){
+  if(!ids||!ids.length) return;
+  if(settled && !confirm(`Označiti ${ids.length} rezervacija kao isplaćene partneru?`)) return;
+  try{
+    await api('/api/dashboard/partners/settle',{method:'POST',
+      body:JSON.stringify({booking_ids:ids, settled:!!settled})});
+    go('Partneri');
+  }catch(e){ alert(e.message||'Greška'); }
+}
+
 async function quickBookModal(){
   let tours=[];
   try{ tours=await api('/api/tours?asset_type=jetski'); }catch(e){}
@@ -1545,13 +1639,13 @@ async function quickBookModal(){
     <h3 style="margin-top:0">Brza rezervacija</h3>
     <p style="color:var(--mut);font-size:13px;margin-top:0">Za goste dogovorene na WhatsAppu ili na licu mjesta.</p>
     <label>Tura</label>
-    <select id="qb_tour">${tours.map(t=>
-      `<option value="${t.id}">${t.name} · ${t.duration_minutes} min · ${t.price} €</option>`).join('')}</select>
+    <select id="qb_tour" onchange="qbCalc()">${tours.map(t=>
+      `<option value="${t.id}" data-price="${t.price}">${t.name} · ${t.duration_minutes} min · ${t.price} €</option>`).join('')}</select>
     <label>Kada</label>
     <input id="qb_start" type="datetime-local" value="${def}">
     <div style="display:flex;gap:10px">
       <div style="flex:1"><label>Koliko jetova</label>
-        <input id="qb_qty" type="number" min="1" max="6" value="1"></div>
+        <input id="qb_qty" type="number" min="1" max="6" value="1" oninput="qbCalc()"></div>
       <div style="flex:1"><label>Ukupno osoba</label>
         <input id="qb_pax" type="number" min="1" value="1"></div>
     </div>
@@ -1561,11 +1655,42 @@ async function quickBookModal(){
     <input id="qb_phone" placeholder="+385 91 234 5678">
     <label>Email (nije obavezno)</label>
     <input id="qb_email" placeholder="gost@email.com">
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+      <div style="display:flex;gap:10px">
+        <div style="flex:1"><label>Već plaćeno (€)</label>
+          <input id="qb_paid" type="number" min="0" step="1" value="0" oninput="qbCalc()"></div>
+        <div style="flex:1"><label>Čime</label>
+          <select id="qb_method">
+            <option value="cash">Gotovina</option>
+            <option value="card">Kartica / link</option>
+          </select></div>
+      </div>
+      <div id="qb_calc" style="background:var(--sand);border-radius:8px;padding:10px 12px;margin-top:10px;font-size:13px"></div>
+    </div>
     <div id="qb_msg" style="font-size:13px;margin-top:8px"></div>
     <div style="display:flex;gap:8px;margin-top:16px">
       <button class="btn" onclick="saveQuickBooking()">Spremi rezervaciju</button>
       <button class="btn btn-ghost" onclick="closeModal()">Odustani</button>
     </div>`);
+  qbCalc();
+}
+
+function qbCalc(){
+  const sel=document.getElementById('qb_tour');
+  const box=document.getElementById('qb_calc');
+  if(!sel||!box) return;
+  const o=sel.options[sel.selectedIndex];
+  const price=o?parseFloat(o.getAttribute('data-price')||0):0;
+  const qty=+val('qb_qty')||1;
+  const paid=parseFloat(val('qb_paid')||0)||0;
+  const total=price*qty;
+  const rest=Math.max(total-paid,0);
+  box.innerHTML=`
+    <div style="display:flex;justify-content:space-between"><span style="color:var(--mut)">Ukupno</span><b>${money(total)}</b></div>
+    <div style="display:flex;justify-content:space-between"><span style="color:var(--mut)">Plaćeno</span><b>${money(paid)}</b></div>
+    <div style="display:flex;justify-content:space-between;margin-top:4px;padding-top:6px;border-top:1px solid var(--line)">
+      <span style="color:var(--mut)">${rest>0?'Za naplatiti':'Podmireno'}</span>
+      <b style="color:${rest>0?'#b06f00':'var(--good)'};font-size:15px">${rest>0?money(rest):'✓'}</b></div>`;
 }
 
 async function saveQuickBooking(){
@@ -1578,6 +1703,8 @@ async function saveQuickBooking(){
     name:val('qb_name'),
     phone:val('qb_phone'),
     email:val('qb_email'),
+    paid:parseFloat(val('qb_paid')||0)||0,
+    pay_method:val('qb_method')||'cash',
   };
   if(!body.name && !body.phone){
     if(msg){ msg.style.color='var(--bad)'; msg.textContent='Upiši barem ime ili broj.'; } return;
@@ -1586,7 +1713,8 @@ async function saveQuickBooking(){
   try{
     const r=await api('/api/bookings/quick',{method:'POST',body:JSON.stringify(body)});
     if(msg){ msg.style.color='var(--good)';
-      msg.textContent=`Spremljeno: ${r.count}× ${r.tour} · ${r.total} €`; }
+      msg.textContent=`Spremljeno: ${r.count}× ${r.tour} · ${money(r.total)}`
+        + (r.balance>0?` · za naplatiti ${money(r.balance)}`:' · podmireno ✓'); }
     setTimeout(()=>{ closeModal(); go('Danas'); }, 700);
   }catch(e){ if(msg){ msg.style.color='var(--bad)'; msg.textContent=e.message||'Greška'; } }
 }
@@ -1655,7 +1783,7 @@ async function saveBookingEdit(id){
   try{
     const r=await api('/api/bookings/'+id+'/edit',{method:'POST',body:JSON.stringify(body)});
     if(msg){ msg.style.color='var(--good)'; msg.textContent='Spremljeno ✓'; }
-    setTimeout(()=>{ closeModal(); go('Bookings'); }, 500);
+    setTimeout(()=>{ closeModal(); go('Rezervacije'); }, 500);
   }catch(e){ if(msg){ msg.style.color='var(--bad)'; msg.textContent=e.message||'Greška'; } }
 }
 
@@ -1668,7 +1796,7 @@ async function recordCash(id, suggested){
     const r=await api('/api/bookings/'+id+'/cash',{method:'POST',
       body:JSON.stringify({amount})});
     closeModal();
-    go('Bookings');
+    go('Rezervacije');
     setTimeout(()=>alert(r.balance>0
       ? `Zabilježeno ${amount.toFixed(2)} €. Ostaje još ${r.balance.toFixed(2)} €.`
       : `Zabilježeno ${amount.toFixed(2)} € — rezervacija je podmirena ✓`), 200);

@@ -42,6 +42,8 @@ class Booking(Base):
     # cash collected on site (separate from online/card payments)
     cash_collected: Mapped[float] = mapped_column(Float, default=0.0)
     cash_note: Mapped[str] = mapped_column(String(255), default="")
+    # partner payouts: has this booking's partner share been paid out?
+    partner_settled: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped["DateTime"] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     asset = relationship("Asset")

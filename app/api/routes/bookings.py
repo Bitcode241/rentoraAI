@@ -172,15 +172,34 @@ def quick_booking(payload: dict, db: Session = Depends(get_db),
 
     created = []
     per_unit_pax = max(1, passengers // qty) if qty else passengers
+    # the guest may already have paid something (cash on the spot, myPOS link…)
+    try:
+        prepaid = float(payload.get("paid") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Neispravan iznos uplate.")
+    pay_method = (payload.get("pay_method") or "cash").strip().lower()
+    total_all = (tour.price or 0) * qty
+    if prepaid > total_all + 0.01:
+        raise HTTPException(400, "Uplaćeno je veće od ukupne cijene.")
+    per_unit_paid = round(prepaid / qty, 2) if qty else prepaid
+
     for u in free[:qty]:
+        unit_total = tour.price or 0
         b = Booking(asset_id=u.id, customer_id=cust.id,
                     start_datetime=start, end_datetime=end,
-                    total_price=tour.price or 0,
-                    deposit_amount=round((tour.price or 0) *
+                    total_price=unit_total,
+                    deposit_amount=round(unit_total *
                                          (tour.deposit_percent or 30) / 100.0, 2),
                     payment_status="unpaid", status="confirmed",
                     passengers=per_unit_pax, package_name=tour.name,
                     source="admin", tour_type_id=tour.id)
+        if per_unit_paid > 0:
+            if pay_method == "cash":
+                b.cash_collected = per_unit_paid
+            else:
+                b.amount_paid = per_unit_paid
+            b.payment_status = ("paid" if per_unit_paid + 0.01 >= unit_total
+                                else "deposit_paid")
         db.add(b)
         db.commit()
         created.append(b.id)
@@ -191,7 +210,9 @@ def quick_booking(payload: dict, db: Session = Depends(get_db),
                         f"· {start:%Y-%m-%d %H:%M} · {(tour.price or 0) * qty:.2f} EUR")
     log.info("quick_booking_created", ids=created, tour=tour.name, qty=qty)
     return {"ok": True, "booking_ids": created, "count": len(created),
-            "total": round((tour.price or 0) * qty, 2),
+            "total": round(total_all, 2),
+            "paid": round(prepaid, 2),
+            "balance": round(max(total_all - prepaid, 0), 2),
             "tour": tour.name, "customer_id": cust.id}
 
 
