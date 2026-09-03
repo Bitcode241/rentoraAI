@@ -50,6 +50,9 @@ def get_business(db: Session = Depends(get_db), _=Depends(get_current_user)):
         "vat_rate": settings_service.get(db, "vat_rate", "25") or "25",
         "stripe_fee_pct": settings_service.get(db, "stripe_fee_pct", "3.6") or "3.6",
         "in_vat_system": (settings_service.get(db, "in_vat_system", "1") or "1") == "1",
+        "payment_provider": settings_service.get(db, "payment_provider", "stripe") or "stripe",
+        "mypos_ready": __import__("app.services.mypos_service",
+                                 fromlist=["enabled"]).enabled(),
         "default_deposit_percent": settings_service.default_deposit_percent(db),
         "jetski_extra_person_fee": settings_service.jetski_extra_person_fee(db),
         "brand_boat": settings_service.brand_for_type(db, "boat"),
@@ -84,6 +87,10 @@ def update_business(payload: dict, db: Session = Depends(get_db)):
         meeting_service.set_meeting_points(db, payload["meeting_points"])
     if "whatsapp_number" in payload:
         meeting_service.set_whatsapp_number(db, str(payload["whatsapp_number"]))
+    if "payment_provider" in payload:
+        choice = str(payload["payment_provider"]).strip().lower()
+        settings_service.set(db, "payment_provider",
+                             choice if choice in ("stripe", "mypos") else "stripe")
     if "google_ads_id" in payload:
         settings_service.set(db, "google_ads_id", str(payload["google_ads_id"]).strip())
     if "google_ads_label" in payload:
@@ -110,4 +117,8 @@ def update_business(payload: dict, db: Session = Depends(get_db)):
         k = f"widget_accent_{t}"
         if k in payload:
             settings_service.set(db, k, str(payload[k]).strip())
+    from app.services import audit
+    changed = [k for k in payload.keys() if k != "meeting_points"]
+    audit.record(db, "settings_updated", actor="admin", entity="settings",
+                 detail="Promijenjeno: " + (", ".join(changed) or "—"))
     return {"ok": True}

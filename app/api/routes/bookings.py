@@ -10,6 +10,11 @@ from app.core.logging import get_logger
 
 log = get_logger(__name__)
 
+
+def _actor(user) -> str:
+    """Username for the audit trail (falls back gracefully)."""
+    return getattr(user, "username", None) or str(user or "admin")
+
 router = APIRouter(prefix="/api/bookings", tags=["bookings"])
 
 
@@ -179,6 +184,11 @@ def quick_booking(payload: dict, db: Session = Depends(get_db),
         db.add(b)
         db.commit()
         created.append(b.id)
+    from app.services import audit
+    audit.record(db, "quick_booking", actor=_actor(_), entity="booking",
+                 entity_id=",".join(str(i) for i in created),
+                 detail=f"{len(created)}× {tour.name} · {cust.full_name or cust.phone} "
+                        f"· {start:%Y-%m-%d %H:%M} · {(tour.price or 0) * qty:.2f} EUR")
     log.info("quick_booking_created", ids=created, tour=tour.name, qty=qty)
     return {"ok": True, "booking_ids": created, "count": len(created),
             "total": round((tour.price or 0) * qty, 2),
@@ -194,6 +204,9 @@ def edit_booking(booking_id: int, payload: dict, db: Session = Depends(get_db),
     b = db.get(Booking, booking_id)
     if not b:
         raise HTTPException(404, "Booking not found")
+    from app.services import audit
+    _fields = ["package_name", "passengers", "total_price", "payment_status"]
+    _before = audit.snapshot(b, _fields)
 
     if "package_name" in payload:
         b.package_name = str(payload["package_name"] or "")[:120]
@@ -239,6 +252,9 @@ def edit_booking(booking_id: int, payload: dict, db: Session = Depends(get_db),
     else:
         b.payment_status = "deposit_paid"
     db.commit()
+    audit.record_change(db, "booking_edited", actor=_actor(_), entity="booking",
+                        entity_id=b.id, before=_before,
+                        after=audit.snapshot(b, _fields))
     log.info("booking_edited", booking_id=b.id, total=total, settled=settled)
     return {"ok": True, "id": b.id, "total_price": b.total_price,
             "payment_status": b.payment_status,
@@ -268,6 +284,12 @@ def record_cash(booking_id: int, payload: dict, db: Session = Depends(get_db),
         if b.status == "pending":
             b.status = "confirmed"
     db.commit()
+    from app.services import audit
+    audit.record(db, "cash_recorded", actor=_actor(_), entity="booking",
+                 entity_id=b.id,
+                 detail=f"Naplaćeno u gotovini: {b.cash_collected:.2f} EUR "
+                        f"(ukupno {b.total_price or 0:.2f}, "
+                        f"status {b.payment_status})")
     log.info("cash_recorded", booking_id=b.id, amount=b.cash_collected)
     return {"ok": True, "cash_collected": b.cash_collected,
             "payment_status": b.payment_status,

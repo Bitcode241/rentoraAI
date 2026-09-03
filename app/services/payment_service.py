@@ -26,6 +26,23 @@ def _client():
     return stripe
 
 
+def active_provider(db) -> str:
+    """Which card provider to charge with: 'stripe' (default) or 'mypos'.
+
+    Kept as a setting so the owner can flip it in the admin without a deploy —
+    and flip straight back if anything looks wrong.
+    """
+    from app.services import settings_service
+    choice = (settings_service.get(db, "payment_provider", "stripe") or "stripe").lower()
+    if choice == "mypos":
+        from app.services import mypos_service
+        if mypos_service.enabled():
+            return "mypos"
+        log.warning("mypos_selected_but_not_configured_falling_back")
+        return "stripe"
+    return "stripe"
+
+
 def create_deposit_checkout(booking, asset_name: str, guest_email: str = "",
                             override_amount: float = None,
                             group_booking_ids: list = None,

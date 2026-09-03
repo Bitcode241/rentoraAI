@@ -65,6 +65,64 @@ def create_checkout(booking_id: int, send_email: bool = False,
     return res
 
 
+@router.post("/mypos/notify")
+async def mypos_notify(request: Request, db: Session = Depends(get_db)):
+    """Server-to-server callback from myPOS after a purchase.
+
+    The signature is verified before anything is marked paid — an unverified
+    callback is ignored outright.
+    """
+    from app.services import mypos_service
+    form = dict((await request.form()))
+    signature = form.pop("Signature", "")
+    if not mypos_service.verify_notification(form, signature):
+        log.warning("mypos_notify_rejected", order=form.get("OrderID", ""))
+        # 200 so myPOS stops retrying, but we changed nothing
+        return {"status": "rejected"}
+
+    data = mypos_service.parse_notification(form)
+    if not data["paid"]:
+        log.info("mypos_notify_not_paid", order=data["order_id"],
+                 status=data["status"])
+        return {"status": "ignored"}
+
+    # OrderID looks like RENT-<booking_id>
+    order = str(data["order_id"] or "")
+    try:
+        booking_id = int(order.split("-")[-1])
+    except (ValueError, IndexError):
+        log.warning("mypos_notify_bad_order", order=order)
+        return {"status": "bad_order"}
+
+    lead = db.get(Booking, booking_id)
+    if not lead:
+        log.warning("mypos_notify_unknown_booking", booking_id=booking_id)
+        return {"status": "unknown_booking"}
+
+    group = (db.query(Booking)
+             .filter(Booking.stripe_session_id == lead.stripe_session_id)
+             .all()) if lead.stripe_session_id else [lead]
+    if not group:
+        group = [lead]
+    share = round(data["amount"] / max(len(group), 1), 2)
+    for b in group:
+        b.amount_paid = (b.amount_paid or 0) + share
+        b.payment_status = ("paid" if (b.amount_paid or 0) + 0.01 >= (b.total_price or 0)
+                            else "deposit_paid")
+        if b.status == "pending":
+            b.status = "confirmed"
+        b.stripe_payment_intent = data["ipc_trnref"]
+    db.commit()
+    log.info("mypos_payment_confirmed", booking_ids=[b.id for b in group],
+             amount=data["amount"], trnref=data["ipc_trnref"])
+    try:
+        _notify_owner_paid(db, lead, group=group)
+        _send_confirmation(db, lead, group=group)
+    except Exception as e:  # pragma: no cover
+        log.warning("mypos_post_payment_failed", booking_id=lead.id, error=str(e))
+    return {"status": "ok"}
+
+
 @router.post("/webhook")
 async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     """Stripe calls this when a payment completes. Verifies signature, then

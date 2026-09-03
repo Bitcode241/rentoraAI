@@ -84,6 +84,9 @@ def update_tour(tour_id: int, payload: dict, db: Session = Depends(get_db),
     t = db.get(TourType, tour_id)
     if not t:
         raise HTTPException(404, "Tura nije pronađena.")
+    from app.services import audit
+    _f = ["name", "price", "duration_minutes", "deposit_percent", "active"]
+    _before = audit.snapshot(t, _f)
     old_name = t.name
     for k in ("name", "asset_type", "description"):
         if k in payload and payload[k] is not None:
@@ -104,6 +107,10 @@ def update_tour(tour_id: int, payload: dict, db: Session = Depends(get_db),
     if old_name != t.name:
         tour_service.remove_tour_from_units(db, t.asset_type, old_name)
     tour_service.sync_tour_to_units(db, t)
+    audit.record_change(db, "tour_updated",
+                        actor=getattr(_, "username", "admin"),
+                        entity="tour", entity_id=t.id,
+                        before=_before, after=audit.snapshot(t, _f))
     return _out(t)
 
 

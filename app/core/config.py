@@ -96,6 +96,14 @@ class Settings(BaseSettings):
     stripe_currency: str = "eur"
     public_base_url: str = "https://app.rentoraai.com"  # for success/cancel redirects
 
+    # ---- myPOS (alternative card provider; same-day settlement) ----
+    mypos_sid: str = ""
+    mypos_wallet: str = ""
+    mypos_private_key: str = ""   # PEM, our key for signing requests
+    mypos_public_key: str = ""    # PEM, myPOS key for verifying notifications
+    mypos_key_index: int = 1
+    mypos_sandbox: bool = True    # stay in sandbox until explicitly switched
+
     def stripe_enabled(self) -> bool:
         return bool(self.stripe_secret_key)
 

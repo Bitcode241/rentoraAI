@@ -2447,3 +2447,70 @@ def test_quick_booking_from_phone(client, auth):
                            "name": "Too Many", "phone": "+385933333333",
                            "start": f"{day}T09:00:00"})
     assert r2.status_code == 409
+
+
+def test_audit_log_records_changes(client, auth):
+    """Every meaningful change is recorded with a readable before -> after."""
+    from app.core.database import SessionLocal
+    from app.models.tour_type import TourType
+    from app.models.booking import Booking
+    db = SessionLocal()
+    t = db.query(TourType).filter(TourType.asset_type == "jetski").first()
+    tid, old_price = t.id, t.price
+    db.close()
+    # change a tour price
+    client.put(f"/api/tours/{tid}", headers=auth,
+               json={"price": (old_price or 0) + 33})
+    r = client.get("/api/dashboard/log?entity=tour", headers=auth)
+    assert r.status_code == 200
+    items = r.json()["items"]
+    hit = next((x for x in items if x["action"] == "tour_updated"
+                and str(x["entity_id"]) == str(tid)), None)
+    assert hit, "tour change not logged"
+    assert "price" in hit["summary"] and "→" in hit["summary"]
+    assert hit["actor"]  # we know who did it
+    # filtering works
+    r2 = client.get("/api/dashboard/log?entity=settings", headers=auth)
+    assert all(x["entity"] == "settings" for x in r2.json()["items"])
+
+
+def test_mypos_signature_rejects_tampering():
+    """A forged or altered myPOS notification must never count as paid."""
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives import serialization
+    from app.core.config import settings
+    from app.services import mypos_service as mp
+    priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    settings.mypos_private_key = priv.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption()).decode()
+    settings.mypos_public_key = priv.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo).decode()
+    params = {"IPCmethod": "IPCPurchase", "Amount": "90.00", "OrderID": "RENT-1"}
+    sig = mp.sign(params)
+    assert mp.verify_notification(params, sig) is True
+    # attacker lowers the amount
+    tampered = dict(params, Amount="0.01")
+    assert mp.verify_notification(tampered, sig) is False
+    # no signature at all
+    assert mp.verify_notification(params, "") is False
+    # garbage signature
+    assert mp.verify_notification(params, "AAAA") is False
+
+
+def test_payment_provider_switch_falls_back_safely():
+    """Choosing myPOS without credentials must fall back to Stripe, not break."""
+    from app.core.database import SessionLocal
+    from app.core.config import settings
+    from app.services import payment_service as ps, settings_service
+    db = SessionLocal()
+    settings.mypos_sid = ""
+    settings.mypos_wallet = ""
+    settings_service.set(db, "payment_provider", "mypos")
+    db.commit()
+    assert ps.active_provider(db) == "stripe"   # safe fallback
+    settings_service.set(db, "payment_provider", "stripe")
+    db.commit()
+    assert ps.active_provider(db) == "stripe"
+    db.close()

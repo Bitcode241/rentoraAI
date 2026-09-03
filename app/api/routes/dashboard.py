@@ -14,6 +14,34 @@ def admin():
     return FileResponse("app/static/admin.html", media_type="text/html")
 
 
+@router.get("/api/dashboard/log")
+def dashboard_log(limit: int = 100, entity: str = "", q: str = "",
+                  db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Audit trail — who changed what and when. The owner's safety net."""
+    from app.models.audit import AuditLog
+    qry = db.query(AuditLog)
+    if entity:
+        qry = qry.filter(AuditLog.entity == entity)
+    if q:
+        like = f"%{q}%"
+        qry = qry.filter(AuditLog.detail.ilike(like) | AuditLog.action.ilike(like))
+    rows = qry.order_by(AuditLog.created_at.desc()).limit(min(limit, 500)).all()
+    out = []
+    for r in rows:
+        # detail holds "human summary\n{json}" — show only the summary line
+        summary = (r.detail or "").split("\n")[0]
+        out.append({
+            "id": r.id,
+            "at": r.created_at,
+            "actor": r.actor or "system",
+            "action": r.action or "",
+            "entity": r.entity or "",
+            "entity_id": r.entity_id or "",
+            "summary": summary[:300],
+        })
+    return {"count": len(out), "items": out}
+
+
 @router.get("/api/dashboard/free")
 def dashboard_free(asset_type: str = "jetski", days: int = 10,
                    db: Session = Depends(get_db), _=Depends(get_current_user)):

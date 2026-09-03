@@ -2,11 +2,12 @@ const API = '';
 let TOKEN = '';
 let DASH = null;
 const PAGES = ['Danas','Slobodno','Dashboard','Calendar','Assets','Tours','Transfers','Add-ons','Widget','Bookings','Novac','Izvori','Customers','Email Inbox','Mail Settings',
-  'Settings',
+  'Settings','Log',
   'Revenue Overview','Upcoming Reservations',
   "Today's Reservations",'Recent Conversations'];
 const SUBS = {
   'Danas':'Tko dolazi, kada, koliko naplatiti',
+  'Log':'Sve promjene u sustavu — tvoja zaštita',
   'Slobodno':'Koliko je jetova slobodno po satu',
   'Dashboard':'Live operational overview',
   'Novac':'Koliko je ušlo i koliko ti stvarno ostaje',
@@ -223,6 +224,41 @@ const RENDER = {
           </div>
         </div>`;
       }).join('')}`;
+  },
+  'Log': async (v)=>{
+    const f=window.__logFilter||'';
+    const d=await api('/api/dashboard/log?limit=150'+(f?('&entity='+f):''));
+    const setF=(x)=>{ window.__logFilter=x; go('Log'); };
+    window.__logSetF=setF;
+    const icon={booking:'📋',tour:'🏷',settings:'⚙',asset:'🚤',customer:'👤'};
+    const nice={booking_created:'Rezervacija stvorena',booking_confirmed:'Rezervacija potvrđena',
+      booking_cancelled:'Rezervacija otkazana',booking_edited:'Rezervacija izmijenjena',
+      cash_recorded:'Naplaćeno gotovinom',quick_booking:'Brza rezervacija',
+      tour_updated:'Tura izmijenjena',settings_updated:'Postavke izmijenjene'};
+    v.innerHTML=`
+      <p style="color:var(--mut);font-size:13px;margin-top:0">Sve promjene u sustavu — tko, što i kada. Zapisi se ne mogu mijenjati.</p>
+      <div class="toolbar" style="margin-bottom:14px">
+        ${[['','Sve'],['booking','Rezervacije'],['tour','Ture'],['settings','Postavke']]
+          .map(([k,l])=>`<button class="btn btn-sm ${f===k?'':'btn-ghost'}" onclick="__logSetF('${k}')">${l}</button>`).join('')}
+      </div>
+      ${!d.items.length?'<div class="panel"><div class="empty">Nema zapisa.</div></div>':
+      `<div class="panel" style="padding:0">
+        ${d.items.map((x,i)=>`
+          <div style="padding:12px 16px;${i?'border-top:1px solid var(--line)':''}">
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+              <div style="min-width:0;flex:1">
+                <div style="font-weight:600;font-size:13.5px">
+                  ${icon[x.entity]||'•'} ${nice[x.action]||x.action}
+                  ${x.entity_id?`<span style="color:var(--mut);font-weight:400">#${x.entity_id}</span>`:''}
+                </div>
+                <div style="font-size:12.5px;color:var(--mut);margin-top:3px;word-break:break-word">${x.summary||''}</div>
+              </div>
+              <div style="text-align:right;white-space:nowrap;font-size:11px;color:var(--mut)">
+                ${fmt(x.at)}<br><span style="font-size:10px">${x.actor}</span>
+              </div>
+            </div>
+          </div>`).join('')}
+      </div>`}`;
   },
   'Novac': async (v)=>{
     const d = await api('/api/dashboard/money?days=30');
@@ -450,6 +486,16 @@ const RENDER = {
         </div>
         <div id="push_devices" style="margin-bottom:6px"></div>
         <div id="push_msg" style="font-size:13px"></div>
+      </div>
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line)">
+        <div style="font-weight:700;font-size:14px;margin-bottom:4px">Naplata karticom</div>
+        <div style="font-size:12px;color:var(--mut);margin-bottom:10px">Kojim sustavom se naplaćuju depoziti. Prebaci samo kad si testirao da novi radi.</div>
+        <select id="set_provider">
+          <option value="stripe" ${(biz.payment_provider||'stripe')==='stripe'?'selected':''}>Stripe (trenutno provjereno)</option>
+          <option value="mypos" ${biz.payment_provider==='mypos'?'selected':''} ${biz.mypos_ready?'':'disabled'}>myPOS ${biz.mypos_ready?'':'— nedostaju podaci u .env'}</option>
+        </select>
+        ${!biz.mypos_ready?`<div style="font-size:12px;color:var(--warn);margin-top:6px">
+          myPOS nije spreman: treba upisati MYPOS_SID, MYPOS_WALLET i ključeve u .env na serveru.</div>`:''}
       </div>
       <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--line)">
         <div style="font-weight:700;font-size:14px;margin-bottom:4px">Porez i naknade (za stranicu "Novac")</div>
@@ -1736,6 +1782,7 @@ async function saveBusiness(){
       google_ads_id:val('set_ads_id'),
       google_ads_label:val('set_ads_label'),
       vat_rate:val('set_vat')||'25',
+      payment_provider:val('set_provider')||'stripe',
       stripe_fee_pct:val('set_fee')||'3.6',
       in_vat_system:document.getElementById('set_in_vat')?document.getElementById('set_in_vat').checked:true,
       meeting_points:collectMeetingPoints(),
