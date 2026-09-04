@@ -672,15 +672,16 @@ const RENDER = {
         <label>Conversion Label</label>
         <input id="set_ads_label" value="${(biz.google_ads_label||'').replace(/"/g,'&quot;')}" placeholder="abcDEFghiJKL">
       </div>
-      <div style="margin:12px 0 20px"><button class="btn" onclick="saveBusiness()">Spremi brendove</button>
-      <span id="biz_msg" style="margin-left:12px;color:var(--good);font-size:13px"></span></div>
-      <h3>Minimalno vrijeme rezervacije unaprijed</h3>
+      <h3 style="margin-top:22px">Minimalno vrijeme rezervacije unaprijed</h3>
       <p style="color:var(--mut);font-size:13px">Koliko sati prije početka gost može najkasnije rezervirati. (Tvoje admin rezervacije nisu ograničene.)</p>
       <label>Jet ski (sati)</label><input id="lt_jetski" type="number" min="0" value="${lt.jetski}">
       <label>Gliseri / brodovi (sati)</label><input id="lt_boat" type="number" min="0" value="${lt.boat}">
       <label>Transferi (sati)</label><input id="lt_transfer" type="number" min="0" value="${lt.transfer}">
-      <div style="margin-top:16px"><button class="btn" onclick="saveLeadTimes()">Spremi</button>
-      <span id="lt_msg" style="margin-left:12px;color:var(--good);font-size:13px"></span></div>
+    </div>
+    <div class="save-bar">
+      <button class="btn" onclick="saveAllSettings()">Spremi sve postavke</button>
+      <span id="biz_msg" style="font-size:13px"></span>
+      <span id="lt_msg" style="display:none"></span>
     </div>`;
     MP = Array.isArray(biz.meeting_points) ? biz.meeting_points.slice() : [];
     renderMeetingPoints();
@@ -1525,12 +1526,15 @@ async function refundB(id){
 }
 
 
-async function saveLeadTimes(){
+async function saveLeadTimes(quiet){
   const body={jetski:+val('lt_jetski'),boat:+val('lt_boat'),transfer:+val('lt_transfer')};
   try{ await api('/api/settings/lead-times',{method:'PUT',body:JSON.stringify(body)});
-    document.getElementById('lt_msg').textContent='Spremljeno ✓';
-    setTimeout(()=>{const m=document.getElementById('lt_msg');if(m)m.textContent='';},2500);
-  }catch(e){ alert('Greška: '+e.message); }
+    if(!quiet){
+      const m=document.getElementById('lt_msg');
+      if(m){ m.style.display=''; m.textContent='Spremljeno ✓';
+        setTimeout(()=>{if(m)m.textContent='';},2500); }
+    }
+  }catch(e){ if(quiet) throw e; alert('Greška: '+e.message); }
 }
 
 async function chargeDeposit(id){
@@ -2091,7 +2095,23 @@ async function loadPushDevices(){
   }catch(e){}
 }
 
-async function saveBusiness(){
+async function saveAllSettings(){
+  const m=document.getElementById('biz_msg');
+  const say=(t,bad)=>{ if(m){ m.textContent=t; m.style.color=bad?'var(--bad)':'var(--good)'; } };
+  say('Spremam…');
+  try{
+    await saveBusiness(true);      // brands, OIB, locations, payments, tax…
+    await saveLeadTimes(true);     // …and the lead times, in one go
+    say('Sve spremljeno ✓');
+    setTimeout(()=>{ if(m && m.textContent==='Sve spremljeno ✓') m.textContent=''; }, 4000);
+  }catch(e){
+    say(String(e.message||e).includes('Admin')
+      ? 'Nemaš admin ovlasti za spremanje postavki.'
+      : 'Nije spremljeno: '+(e.message||e), true);
+  }
+}
+
+async function saveBusiness(quiet){
   try{
     await api('/api/settings/business',{method:'PUT',body:JSON.stringify({
       brand_boat:val('set_brand_boat'),
@@ -2112,6 +2132,6 @@ async function saveBusiness(){
       meeting_points:collectMeetingPoints(),
       jetski_extra_person_fee:+val('set_extra')||0,
       default_deposit_percent:+val('set_dep')||30})});
-    const m=document.getElementById('biz_msg'); if(m) m.textContent='Spremljeno ✓';
-  }catch(e){ alert(e.message); }
+    if(!quiet){ const m=document.getElementById('biz_msg'); if(m) m.textContent='Spremljeno ✓'; }
+  }catch(e){ if(quiet) throw e; alert(e.message); }
 }

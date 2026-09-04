@@ -2827,3 +2827,28 @@ def test_rebuild_survives_bookings_linked_to_packages(client, auth):
     assert b2.package_id is None          # link cleared, not left dangling
     assert b2.package_name == tour_name   # history preserved
     db.close()
+
+
+def test_settings_saved_by_single_button():
+    """One save button covers the whole Settings page — three separate ones made
+    it easy to click the wrong save and lose the OIB."""
+    js = open("app/static/app.js", encoding="utf-8").read()
+    assert "saveAllSettings" in js
+    assert "Spremi sve postavke" in js
+    # the old ambiguous buttons are gone from the Settings page
+    assert "Spremi brendove" not in js
+    # sticky bar so the button is reachable on a long form
+    css = open("app/static/admin.html", encoding="utf-8").read()
+    assert ".save-bar" in css and "position:sticky" in css
+
+
+def test_sidebar_scrolls_within_panel():
+    """Nav must scroll inside the dark sidebar, not spill onto the page."""
+    css = open("app/static/admin.html", encoding="utf-8").read()
+    aside = css.split("aside{")[1].split("}")[0]
+    assert "height:100vh" in aside
+    assert "overflow:hidden" in aside
+    assert "flex-direction:column" in aside
+    nav = css.split("\n  nav{")[1].split("}")[0]
+    assert "overflow-y:auto" in nav
+    assert "min-height:0" in nav   # required for flex children to actually clip
