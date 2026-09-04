@@ -730,8 +730,10 @@ function bookingTable(b, full){
   if(!b||!b.length) return '<div class="empty">Nema rezervacija</div>';
   return `<div class="bk-list">${b.map(x=>{
     const nm=(x.guest_name||'').trim(), em=(x.guest_email||'').trim(), ph=(x.guest_phone||'').trim();
-    const total=x.total_price||0, paid=x.amount_paid||0;
-    const bal=Math.max(total-paid,0);
+    const total=x.total_price||0;
+    // "paid" must include cash taken on site, not just the online payment
+    const paid=(x.settled!=null)?x.settled:((x.amount_paid||0)+(x.cash_collected||0));
+    const bal=(x.balance!=null)?x.balance:Math.max(total-paid,0);
     const src=(x.utm_source||x.source||'').trim();
     const wa=ph.replace(/[^0-9]/g,'');
     return `<article class="bk" onclick="openDetail(${x.id})">

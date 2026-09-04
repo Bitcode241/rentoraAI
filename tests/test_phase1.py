@@ -2620,3 +2620,38 @@ def test_partner_settlement_math(client, auth):
     r2 = client.get("/api/dashboard/partners?days=90", headers=auth)
     p2 = next(x for x in r2.json()["partners"] if x["partner"] == "Test Partner")
     assert p2["owed"] == 50                   # only the unsettled one remains
+
+
+def test_cash_shows_in_list_and_adds_up(client, auth):
+    """Regression: cash taken on site must appear as paid, and repeat payments add."""
+    from app.core.database import SessionLocal
+    from app.models.tour_type import TourType
+    from app.core.timeutil import to_local
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    t = db.query(TourType).filter(TourType.asset_type == "jetski").first()
+    price, tid = t.price or 0, t.id
+    day = (to_local(datetime.now(timezone.utc)) + timedelta(days=8)).date()
+    db.close()
+    r = client.post("/api/bookings/quick", headers=auth,
+                    json={"tour_id": tid, "qty": 1, "passengers": 2,
+                          "name": "Cash List", "phone": "+385966666666",
+                          "start": f"{day}T10:00:00",
+                          "paid": 30, "pay_method": "cash"}).json()
+    bid = r["booking_ids"][0]
+    rows = client.get("/api/bookings", headers=auth).json()
+    row = next(x for x in rows if x["id"] == bid)
+    # the list must reflect the cash, not show 0
+    assert row["settled"] == 30
+    assert row["balance"] == round(price - 30, 2)
+    # a second cash payment ADDS to the first (does not overwrite it)
+    client.post(f"/api/bookings/{bid}/cash", headers=auth, json={"amount": 10})
+    rows2 = client.get("/api/bookings", headers=auth).json()
+    row2 = next(x for x in rows2 if x["id"] == bid)
+    assert row2["settled"] == 40, "second cash payment overwrote the first"
+    # 'replace' is available for corrections
+    client.post(f"/api/bookings/{bid}/cash", headers=auth,
+                json={"amount": 5, "replace": True})
+    rows3 = client.get("/api/bookings", headers=auth).json()
+    row3 = next(x for x in rows3 if x["id"] == bid)
+    assert row3["settled"] == 5

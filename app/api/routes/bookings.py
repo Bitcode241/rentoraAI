@@ -46,6 +46,9 @@ def list_bookings(status: Optional[str] = None, db: Session = Depends(get_db),
             # some records store the email as the name — show a clean blank instead
             if name and "@" in name and name == (c.email or ""):
                 name = ""
+        cash = getattr(b, "cash_collected", 0) or 0
+        online = b.amount_paid or 0
+        settled = online + cash
         out.append({
             "id": b.id,
             "asset_id": b.asset_id,
@@ -55,7 +58,11 @@ def list_bookings(status: Optional[str] = None, db: Session = Depends(get_db),
             "end_datetime": b.end_datetime,
             "total_price": b.total_price,
             "deposit_amount": b.deposit_amount,
-            "amount_paid": b.amount_paid,
+            "amount_paid": online,
+            "cash_collected": round(cash, 2),
+            # everything actually received — what the UI should show as "paid"
+            "settled": round(settled, 2),
+            "balance": round(max((b.total_price or 0) - settled, 0), 2),
             "status": b.status,
             "payment_status": b.payment_status,
             "source": b.source,
@@ -296,14 +303,23 @@ def record_cash(booking_id: int, payload: dict, db: Session = Depends(get_db),
         raise HTTPException(400, "Neispravan iznos.")
     if amount < 0:
         raise HTTPException(400, "Iznos ne može biti negativan.")
-    b.cash_collected = round(amount, 2)
-    b.cash_note = str(payload.get("note") or "")[:255]
+    # "replace" overwrites the running total (for corrections); by default a new
+    # payment is ADDED, so paying in two goes doesn't wipe the earlier amount
+    if payload.get("replace"):
+        b.cash_collected = round(amount, 2)
+    else:
+        b.cash_collected = round((getattr(b, "cash_collected", 0) or 0) + amount, 2)
+    if payload.get("note"):
+        b.cash_note = str(payload["note"])[:255]
     # total settled = what came in online + what was collected in cash
     settled = (b.amount_paid or 0) + b.cash_collected
-    if settled + 0.01 >= (b.total_price or 0):
+    total = b.total_price or 0
+    if settled + 0.01 >= total:
         b.payment_status = "paid"
         if b.status == "pending":
             b.status = "confirmed"
+    elif settled > 0:
+        b.payment_status = "deposit_paid"
     db.commit()
     from app.services import audit
     audit.record(db, "cash_recorded", actor=_actor(_), entity="booking",
