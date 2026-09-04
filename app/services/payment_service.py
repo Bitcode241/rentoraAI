@@ -46,7 +46,8 @@ def active_provider(db) -> str:
 def create_deposit_checkout(booking, asset_name: str, guest_email: str = "",
                             override_amount: float = None,
                             group_booking_ids: list = None,
-                            attribution: dict = None) -> dict:
+                            attribution: dict = None,
+                            db=None, guest_name: str = "") -> dict:
     """Create a Stripe Checkout Session for the booking deposit.
     override_amount: charge this instead of booking.deposit_amount (for multi-unit
     bookings where several units share one checkout).
@@ -55,6 +56,22 @@ def create_deposit_checkout(booking, asset_name: str, guest_email: str = "",
     attribution: {source, medium, campaign, term, gclid} — marketing source, stored
     in Stripe metadata and later on the booking for reporting.
     Returns {url, session_id} or {error}."""
+    # myPOS uses a form POST to a hosted page rather than a redirect URL, so we
+    # hand back a link to our own bridge page which submits that form.
+    if db is not None and active_provider(db) == "mypos":
+        from app.services import mypos_service
+        amount = (override_amount if override_amount is not None
+                  else (booking.deposit_amount or 0))
+        built = mypos_service.build_purchase(
+            booking, asset_name, amount, guest_email=guest_email,
+            guest_name=guest_name, group_booking_ids=group_booking_ids)
+        if "error" in built:
+            return built
+        if group_booking_ids:
+            booking.stripe_session_id = built["order_id"]
+        base = (settings.public_base_url or "").rstrip("/")
+        return {"url": f"{base}/pay/mypos/{built['order_id']}",
+                "session_id": built["order_id"], "provider": "mypos"}
     stripe = _client()
     if not stripe:
         return {"error": "stripe_not_configured",

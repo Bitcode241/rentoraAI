@@ -27,7 +27,8 @@ def create_checkout(booking_id: int, send_email: bool = False,
     asset = db.get(Asset, b.asset_id)
     cust = db.get(Customer, b.customer_id)
     res = payment_service.create_deposit_checkout(
-        b, asset.name if asset else "Plovilo", cust.email if cust else "")
+        b, asset.name if asset else "Plovilo", cust.email if cust else "",
+        db=db, guest_name=(cust.full_name if cust else ""))
     if "url" not in res:
         return res
     b.stripe_session_id = res["session_id"]

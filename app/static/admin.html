@@ -60,10 +60,17 @@
   /* sticky save bar so the button is always reachable on long forms */
   .save-bar{position:sticky;bottom:0;background:var(--paper);border-top:1px solid var(--line);
     padding:14px 0;margin-top:18px;display:flex;align-items:center;gap:14px;z-index:5}
-  /* group heading, e.g. "Novac" — quiet, uppercase, separates the sections */
+  /* group heading doubles as a collapse toggle */
   .nav-sec{color:#5f7480;font-size:10px;font-weight:700;letter-spacing:1.4px;
-    text-transform:uppercase;padding:16px 13px 6px;margin-top:6px;
-    border-top:1px solid rgba(255,255,255,.07)}
+    text-transform:uppercase;padding:15px 13px 6px;margin-top:5px;
+    border-top:1px solid rgba(255,255,255,.07);
+    background:none;border-left:none;border-right:none;border-bottom:none;
+    width:100%;text-align:left;cursor:pointer;display:flex;
+    align-items:center;justify-content:space-between;transition:.12s}
+  .nav-sec:hover{color:#9db0ba}
+  .nav-sec .caret{font-size:9px;opacity:.7}
+  .nav-grp{display:flex;flex-direction:column;gap:1px}
+  .nav-grp[hidden]{display:none}   /* [hidden] alone loses to display:flex */
   .nav-sec:first-child{border-top:none;margin-top:0}
   nav a{color:#b7c4cb;text-decoration:none;padding:9px 13px;border-radius:6px;font-size:14px;
     display:flex;align-items:center;gap:10px;transition:.12s;cursor:pointer;

@@ -63,17 +63,51 @@ function boot(){
   document.getElementById('login').style.display='none';
   document.getElementById('shell').style.display='grid';
   const nav = document.getElementById('nav');
-  nav.innerHTML = NAV_GROUPS.map(g=>
-    (g.label?`<div class="nav-sec">${g.label}</div>`:'') +
-    g.items.map(p=>`<a data-p="${p.replace(/"/g,'&quot;')}"><span class="dot"></span>${p}</a>`).join('')
-  ).join('');
+  nav.innerHTML = NAV_GROUPS.map((g,gi)=>{
+    if(!g.label) return g.items.map(navLink).join('');
+    const open = navGroupOpen(g.label);
+    return `<button class="nav-sec" data-g="${g.label}" onclick="toggleGroup('${g.label}')">
+        <span>${g.label}</span><span class="caret">${open?'▾':'▸'}</span></button>
+      <div class="nav-grp" data-g="${g.label}" ${open?'':'hidden'}>${g.items.map(navLink).join('')}</div>`;
+  }).join('');
   nav.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>go(a.dataset.p)));
   go('Danas');
   refreshBadges();
   setInterval(refreshBadges, 120000);   // refresh every 2 min
 }
-function setActive(p){ document.querySelectorAll('#nav a').forEach(a=>
-  a.classList.toggle('active', a.dataset.p===p)); }
+function navLink(p){
+  return `<a data-p="${p.replace(/"/g,'&quot;')}"><span class="dot"></span>${p}</a>`;
+}
+// remember which groups the owner left open, per device
+function navGroupOpen(label){
+  try{
+    const s=JSON.parse(localStorage.getItem('navClosed')||'[]');
+    return !s.includes(label);
+  }catch(e){ return true; }
+}
+function toggleGroup(label){
+  let closed=[];
+  try{ closed=JSON.parse(localStorage.getItem('navClosed')||'[]'); }catch(e){}
+  const i=closed.indexOf(label);
+  if(i>-1) closed.splice(i,1); else closed.push(label);
+  localStorage.setItem('navClosed', JSON.stringify(closed));
+  const open=i>-1;
+  const box=document.querySelector(`.nav-grp[data-g="${label}"]`);
+  const btn=document.querySelector(`.nav-sec[data-g="${label}"] .caret`);
+  if(box) box.hidden=!open;
+  if(btn) btn.textContent=open?'▾':'▸';
+}
+
+function setActive(p){
+  document.querySelectorAll('#nav a').forEach(a=>
+    a.classList.toggle('active', a.dataset.p===p));
+  // if the page lives in a collapsed group, open it so the highlight is visible
+  const g=NAV_GROUPS.find(x=>x.label && x.items.includes(p));
+  if(g){
+    const box=document.querySelector(`.nav-grp[data-g="${g.label}"]`);
+    if(box && box.hidden) toggleGroup(g.label);
+  }
+}
 
 async function refreshBadges(){
   // small live counters so the sidebar shows what needs attention

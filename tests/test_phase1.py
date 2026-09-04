@@ -1157,7 +1157,7 @@ def test_jetski_hard_cap_two_per_unit():
     db.close()
 
 
-def test_addons_in_deposit_and_passengers_min():
+def test_addons_in_deposit_and_passengers_min(monkeypatch):
     """Add-ons are fully in the deposit; passengers default to at least 1 per unit."""
     from app.core.database import SessionLocal
     from app.models.asset import Asset
@@ -1165,7 +1165,10 @@ def test_addons_in_deposit_and_passengers_min():
     from app.models.booking import Booking
     from app.api.routes import public_booking as pb
     import app.services.payment_service as ps
-    ps.create_deposit_checkout = lambda b, name, guest_email="", override_amount=None, group_booking_ids=None, attribution=None: {"url": "http://t", "session_id": "x"}
+    monkeypatch.setattr(ps, "create_deposit_checkout",
+                        lambda b, name, guest_email="", override_amount=None,
+                        group_booking_ids=None, attribution=None, db=None,
+                        guest_name="": {"url": "http://t", "session_id": "x"})
     db = SessionLocal()
     for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
         j.model_group = "yamaha-vx"
@@ -1197,7 +1200,7 @@ def test_widget_transfer_in_deposit(monkeypatch):
     import app.services.geo_service as g
     import app.services.payment_service as ps
     monkeypatch.setattr(ps, "create_deposit_checkout",
-                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None, attribution=None: {"url": "http://t", "session_id": "x"})
+                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None, attribution=None, db=None, guest_name="": {"url": "http://t", "session_id": "x"})
     db = SessionLocal()
     for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
         j.model_group = "yamaha-vx"
@@ -1243,7 +1246,7 @@ def test_widget_transfer_stores_pickup(monkeypatch):
     import app.services.geo_service as g
     import app.services.payment_service as ps
     monkeypatch.setattr(ps, "create_deposit_checkout",
-                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None, attribution=None: {"url": "http://t", "session_id": "x"})
+                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None, attribution=None, db=None, guest_name="": {"url": "http://t", "session_id": "x"})
     db = SessionLocal()
     for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
         j.model_group = "yamaha-vx"
@@ -1318,7 +1321,7 @@ def test_partner_widget_charges_only_commission(monkeypatch):
     import app.services.payment_service as ps
     captured = {}
 
-    def fake(b, name, guest_email="", override_amount=None, group_booking_ids=None, attribution=None):
+    def fake(b, name, guest_email="", override_amount=None, group_booking_ids=None, attribution=None, db=None, guest_name=""):
         captured["amount"] = override_amount
         return {"url": "http://t", "session_id": "x"}
     monkeypatch.setattr(ps, "create_deposit_checkout", fake)
@@ -1543,7 +1546,7 @@ def test_widget_blocks_past_and_too_soon(monkeypatch):
     from datetime import datetime, timezone, timedelta
     import app.services.payment_service as ps
     monkeypatch.setattr(ps, "create_deposit_checkout",
-                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None, attribution=None: {"url": "http://t", "session_id": "x"})
+                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None, attribution=None, db=None, guest_name="": {"url": "http://t", "session_id": "x"})
     db = SessionLocal()
     for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
         j.model_group = "yamaha-vx"
@@ -1608,7 +1611,7 @@ def test_meeting_arranged_flow(monkeypatch):
     import app.services.payment_service as ps
     from datetime import date, timedelta
     monkeypatch.setattr(ps, "create_deposit_checkout",
-                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None, attribution=None: {"url": "http://t", "session_id": "x"})
+                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None, attribution=None, db=None, guest_name="": {"url": "http://t", "session_id": "x"})
     db = SessionLocal()
     for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
         j.model_group = "yamaha-vx"
@@ -1935,7 +1938,7 @@ def test_attribution_stored_and_reported(monkeypatch):
     import app.services.payment_service as ps
     from datetime import date, timedelta
     monkeypatch.setattr(ps, "create_deposit_checkout",
-                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None, attribution=None: {"url": "http://t", "session_id": "x"})
+                        lambda b, name, guest_email="", override_amount=None, group_booking_ids=None, attribution=None, db=None, guest_name="": {"url": "http://t", "session_id": "x"})
     db = SessionLocal()
     for j in db.query(Asset).filter(Asset.asset_type == "jetski").all():
         j.model_group = "yamaha-vx"
@@ -2140,7 +2143,7 @@ def test_checkout_returns_guest_info_for_sending(client, auth, monkeypatch):
     from datetime import datetime, timezone, timedelta
     monkeypatch.setattr(ps, "create_deposit_checkout",
                         lambda b, name, guest_email="", override_amount=None,
-                        group_booking_ids=None, attribution=None:
+                        group_booking_ids=None, attribution=None, db=None, guest_name="":
                         {"url": "https://checkout.stripe.com/c/pay/cs_x",
                          "session_id": "cs_x"})
     db = SessionLocal()
@@ -2180,7 +2183,7 @@ def test_deposit_link_emails_guest(monkeypatch):
     from datetime import datetime, timezone, timedelta
     monkeypatch.setattr(ps, "create_deposit_checkout",
                         lambda b, name, guest_email="", override_amount=None,
-                        group_booking_ids=None, attribution=None:
+                        group_booking_ids=None, attribution=None, db=None, guest_name="":
                         {"url": "https://checkout.stripe.com/c/pay/cs_x",
                          "session_id": "cs_x"})
     sent = {}
@@ -2852,3 +2855,57 @@ def test_sidebar_scrolls_within_panel():
     nav = css.split("\n  nav{")[1].split("}")[0]
     assert "overflow-y:auto" in nav
     assert "min-height:0" in nav   # required for flex children to actually clip
+
+
+def test_mypos_checkout_flow(client, auth):
+    """With myPOS selected, checkout returns a bridge page that POSTs a signed
+    form to the myPOS sandbox — and never to the live endpoint by accident."""
+    import re
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives import serialization
+    from app.core.config import settings
+    from app.core.database import SessionLocal
+    from app.models.tour_type import TourType
+    from app.services import settings_service
+    from app.core.timeutil import to_local
+    from datetime import datetime, timezone, timedelta
+    priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = priv.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption()).decode()
+    # set every field enabled() checks — an earlier test clears them
+    settings.mypos_sid = "000000000000010"
+    settings.mypos_wallet = "61938166610"
+    settings.mypos_private_key = pem
+    settings.mypos_public_key = priv.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo).decode()
+    settings.mypos_sandbox = True
+    from app.services import mypos_service
+    assert mypos_service.enabled(), "myPOS credentials not picked up"
+    db = SessionLocal()
+    settings_service.set(db, "payment_provider", "mypos")
+    db.commit()
+    t = db.query(TourType).filter(TourType.asset_type == "jetski").first()
+    tid = t.id
+    day = (to_local(datetime.now(timezone.utc)) + timedelta(days=13)).date()
+    db.close()
+    bid = client.post("/api/bookings/quick", headers=auth,
+                      json={"tour_id": tid, "qty": 1, "passengers": 2,
+                            "name": "myPOS Guest", "phone": "+385900999888",
+                            "start": f"{day}T10:00:00"}).json()["booking_ids"][0]
+    r = client.post(f"/api/payments/checkout/{bid}", headers=auth)
+    assert r.status_code == 200
+    assert r.json().get("provider") == "mypos"
+    order = r.json()["session_id"]
+    page = client.get(f"/pay/mypos/{order}")
+    assert page.status_code == 200
+    html = page.text
+    # sandbox endpoint, not the live one
+    assert "checkout-test" in html
+    assert re.search(r'name="Signature" value="[^"]{20}', html), "form not signed"
+    assert "/api/payments/mypos/notify" in html
+    # back to Stripe so other tests are unaffected
+    db = SessionLocal()
+    settings_service.set(db, "payment_provider", "stripe")
+    db.commit(); db.close()

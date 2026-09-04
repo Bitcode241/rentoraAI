@@ -365,7 +365,7 @@ def public_book(payload: dict, request: Request, db: Session = Depends(get_db)):
     pay = payment_service.create_deposit_checkout(
         lead, label, guest_email=email, override_amount=charge_amount,
         group_booking_ids=[b.id for b in bookings],
-        attribution=attribution)
+        attribution=attribution, db=db, guest_name=name)
     if not pay.get("url"):
         return {"error": "payment_failed", "booking_id": lead.id}
     log.info("public_booking_created", booking_id=lead.id, asset=anchor.name,
@@ -481,6 +481,53 @@ h1{{font-size:22px;margin:0 0 8px}}p{{color:#6a7e8c;line-height:1.5;margin:0}}
 .pw{{margin-top:24px;font-size:11px;color:#9fb0bb}}</style></head>
 <body><div class="box"><div class="ic">{icon}</div><h1>{title}</h1><p>{msg}</p>
 <div class="pw">Powered by <b>RentoraAI</b></div></div></body></html>""")
+
+
+@widget_router.get("/pay/mypos/{order_id}")
+def pay_mypos(order_id: str, db: Session = Depends(get_db)):
+    """Bridge page: myPOS Checkout expects a signed form POST, so we render a
+    tiny auto-submitting form. The guest sees it for a fraction of a second."""
+    from app.services import mypos_service
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.models.booking import Booking
+    try:
+        booking_id = int(str(order_id).split("-")[-1])
+    except (ValueError, IndexError):
+        return _result_page("Greška", "Neispravna narudžba.", ok=False)
+    b = db.get(Booking, booking_id)
+    if not b:
+        return _result_page("Greška", "Rezervacija nije pronađena.", ok=False)
+    group = ([x for x in db.query(Booking)
+              .filter(Booking.stripe_session_id == order_id).all()] or [b])
+    amount = sum((x.deposit_amount or 0) for x in group) or (b.deposit_amount or 0)
+    a = db.get(Asset, b.asset_id)
+    c = db.get(Customer, b.customer_id) if b.customer_id else None
+    built = mypos_service.build_purchase(
+        b, (a.name if a else "Rezervacija"), amount,
+        guest_email=(c.email if c else ""),
+        guest_name=(c.full_name if c else ""),
+        order_id=order_id,
+        group_booking_ids=[x.id for x in group])
+    if "error" in built:
+        return _result_page("Plaćanje trenutno nije moguće",
+                            built.get("message", "Pokušajte ponovno."), ok=False)
+    fields = "".join(
+        f'<input type="hidden" name="{k}" value="{str(v).replace(chr(34), "&quot;")}">'
+        for k, v in built["fields"].items())
+    return HTMLResponse(f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Preusmjeravam na plaćanje…</title><style>
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+background:#f6f9fb;color:#0f2230;display:grid;place-items:center;min-height:100vh;margin:0}}
+.box{{text-align:center}}.sp{{width:34px;height:34px;border:3px solid #d6e2e8;
+border-top-color:#2a9d8f;border-radius:50%;margin:0 auto 14px;animation:s .8s linear infinite}}
+@keyframes s{{to{{transform:rotate(360deg)}}}}</style></head>
+<body><div class="box"><div class="sp"></div>
+<p>Preusmjeravam na sigurno plaćanje…</p>
+<form id="f" method="post" action="{built['url']}">{fields}
+<noscript><button type="submit">Nastavi na plaćanje</button></noscript></form></div>
+<script>document.getElementById('f').submit();</script></body></html>""")
 
 
 @widget_router.get("/pay/success")
