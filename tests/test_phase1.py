@@ -2735,3 +2735,47 @@ def test_selfcheck_reports_problems(client, auth):
         assert c["status"] in ("ok", "warn", "fail")
         if c["status"] == "fail":
             assert c["fix"], f"failing check '{c['name']}' has no fix hint"
+
+
+def test_blocks_prevent_booking(client, auth):
+    """A blocked period must be unbookable on every path, and warn about
+    bookings already inside it."""
+    from app.core.database import SessionLocal
+    from app.models.tour_type import TourType
+    from app.core.timeutil import to_local
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    t = db.query(TourType).filter(TourType.asset_type == "jetski").first()
+    tid = t.id
+    day = (to_local(datetime.now(timezone.utc)) + timedelta(days=11)).date()
+    db.close()
+    # book before blocking — works
+    ok = client.post("/api/bookings/quick", headers=auth,
+                     json={"tour_id": tid, "qty": 1, "passengers": 2,
+                           "name": "Before Block", "phone": "+385999111222",
+                           "start": f"{day}T11:00:00"})
+    assert ok.status_code == 200
+    # close the whole fleet for that day (bad weather)
+    r = client.post("/api/blocks", headers=auth,
+                    json={"asset_type": "jetski",
+                          "start": f"{day}T08:00:00", "end": f"{day}T20:00:00",
+                          "reason": "weather", "note": "jugo"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["block"]["scope"] == "fleet"
+    # the existing booking is flagged so the owner can call the guest
+    assert len(body["affected"]) >= 1
+    # now nothing can be booked in that window
+    blocked = client.post("/api/bookings/quick", headers=auth,
+                          json={"tour_id": tid, "qty": 1, "passengers": 2,
+                                "name": "After Block", "phone": "+385999333444",
+                                "start": f"{day}T14:00:00"})
+    assert blocked.status_code == 409
+    # removing the block frees it again
+    bid = body["block"]["id"]
+    assert client.delete(f"/api/blocks/{bid}", headers=auth).status_code == 200
+    again = client.post("/api/bookings/quick", headers=auth,
+                        json={"tour_id": tid, "qty": 1, "passengers": 2,
+                              "name": "After Unblock", "phone": "+385999555666",
+                              "start": f"{day}T14:00:00"})
+    assert again.status_code == 200

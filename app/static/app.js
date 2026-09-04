@@ -4,7 +4,7 @@ let DASH = null;
 // Navigation grouped the way the day actually runs: what's happening now,
 // then the money, then the things you set up once, then the system.
 const NAV_GROUPS = [
-  {label:'', items:['Danas','Slobodno','Kalendar','Rezervacije']},
+  {label:'', items:['Danas','Slobodno','Kalendar','Rezervacije','Blokade']},
   {label:'Novac', items:['Novac','Partneri','Izvori']},
   {label:'Ponuda', items:['Ture','Flota','Transferi','Dodaci','Widget']},
   {label:'Gosti', items:['Gosti','Poruke']},
@@ -14,6 +14,7 @@ const PAGES = NAV_GROUPS.flatMap(g=>g.items);
 const SUBS = {
   'Danas':'Tko dolazi, kada, koliko naplatiti',
   'Slobodno':'Koliko je jedinica slobodno po satu',
+  'Blokade':'Vrijeme, servis, osobno korištenje',
   'Kalendar':'Raspored po plovilima',
   'Rezervacije':'Sve rezervacije, svi kanali',
   'Novac':'Koliko je ušlo i koliko ti stvarno ostaje',
@@ -288,6 +289,40 @@ const RENDER = {
             </div>
           </div>`).join('')}
       </div>`}`;
+  },
+  'Blokade': async (v)=>{
+    const [d, assets] = await Promise.all([
+      api('/api/blocks'), api('/api/assets').catch(()=>[])
+    ]);
+    const ico={weather:'🌊',service:'🔧',personal:'🔒',other:'•'};
+    v.innerHTML=`
+      <p style="color:var(--mut);font-size:13px;margin-top:0">Kad je more loše, jet na servisu ili ga koristiš sam — blokiraj termin da ga nitko ne može rezervirati.</p>
+      <div class="toolbar" style="margin-bottom:14px">
+        <button class="btn btn-sm" onclick="blockModal()">+ Nova blokada</button>
+      </div>
+      ${!d.blocks.length?'<div class="panel"><div class="empty">Nema aktivnih blokada — sve je dostupno.</div></div>':
+      `<div class="bk-list">${d.blocks.map(b=>`
+        <article class="bk" style="cursor:default">
+          <header class="bk-top">
+            <div class="bk-who">
+              <div class="bk-name">${ico[b.reason]||'•'} ${b.reason_label}</div>
+              <div class="bk-sub">${b.scope==='fleet'
+                ? `Cijela flota — ${b.asset_type==='jetski'?'jetovi':'brodovi'}`
+                : b.asset_name||('jedinica #'+b.asset_id)}${b.note?' · '+b.note:''}</div>
+            </div>
+            <div class="bk-when">
+              <div class="bk-date">${fmtDay(b.start)}</div>
+              <div class="bk-time">${fmtTime(b.start)}–${fmtTime(b.end)}</div>
+            </div>
+          </header>
+          <footer class="bk-foot">
+            <div class="bk-tags"><span class="pill">${b.scope==='fleet'?'cijela flota':'1 jedinica'}</span></div>
+            <div class="bk-acts">
+              <button class="ic" title="Ukloni" onclick="delBlock(${b.id})">✕</button>
+            </div>
+          </footer>
+        </article>`).join('')}</div>`}`;
+    window.__assets = assets||[];
   },
   'Provjera': async (v)=>{
     v.innerHTML='<div class="empty">Provjeravam sustav…</div>';
@@ -1656,6 +1691,78 @@ async function openDetail(id){
         <button class="btn btn-ghost" onclick="closeModal()">Zatvori</button>
       </div>`);
   }catch(e){ alert(e.message||'Greška'); }
+}
+
+async function blockModal(){
+  let assets=window.__assets||[];
+  if(!assets.length){ try{ assets=await api('/api/assets'); }catch(e){} }
+  const now=new Date(); now.setMinutes(0,0,0);
+  const p=n=>String(n).padStart(2,'0');
+  const f=d=>`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:00`;
+  const end=new Date(now); end.setHours(end.getHours()+12);
+  openModal(`
+    <h3 style="margin-top:0">Nova blokada</h3>
+    <label>Što blokiraš</label>
+    <select id="bl_scope" onchange="blScope()">
+      <option value="fleet-jetski">Cijelu flotu — jetovi</option>
+      <option value="fleet-boat">Cijelu flotu — brodovi</option>
+      <option value="unit">Jednu jedinicu</option>
+    </select>
+    <div id="bl_unit_wrap" style="display:none">
+      <label>Jedinica</label>
+      <select id="bl_asset">${assets.map(a=>
+        `<option value="${a.id}">${a.name} (${a.asset_type==='jetski'?'jet':'brod'})</option>`).join('')}</select>
+    </div>
+    <label>Razlog</label>
+    <select id="bl_reason">
+      <option value="weather">🌊 Vrijeme (bura/jugo)</option>
+      <option value="service">🔧 Servis / popravak</option>
+      <option value="personal">🔒 Osobno korištenje</option>
+      <option value="other">• Ostalo</option>
+    </select>
+    <div style="display:flex;gap:10px">
+      <div style="flex:1"><label>Od</label><input id="bl_start" type="datetime-local" value="${f(now)}"></div>
+      <div style="flex:1"><label>Do</label><input id="bl_end" type="datetime-local" value="${f(end)}"></div>
+    </div>
+    <label>Bilješka (nije obavezno)</label>
+    <input id="bl_note" placeholder="npr. jugo 6 bofora">
+    <div id="bl_msg" style="font-size:13px;margin-top:8px"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn" onclick="saveBlock()">Blokiraj</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Odustani</button>
+    </div>`);
+}
+
+function blScope(){
+  const s=val('bl_scope');
+  document.getElementById('bl_unit_wrap').style.display = s==='unit'?'block':'none';
+}
+
+async function saveBlock(){
+  const msg=document.getElementById('bl_msg');
+  const scope=val('bl_scope');
+  const body={
+    start:val('bl_start')+':00',
+    end:val('bl_end')+':00',
+    reason:val('bl_reason'),
+    note:val('bl_note'),
+  };
+  if(scope==='unit'){ body.asset_id=+val('bl_asset'); }
+  else { body.asset_type = scope.split('-')[1]; }
+  try{
+    const r=await api('/api/blocks',{method:'POST',body:JSON.stringify(body)});
+    if(r.affected && r.affected.length){
+      closeModal();
+      alert(`Blokirano.\n\nPAŽNJA: ${r.affected.length} postojeć${r.affected.length===1?'a rezervacija je':'ih rezervacija su'} u tom terminu.\nNazovi te goste — sustav ih NIJE otkazao.`);
+    }
+    go('Blokade');
+  }catch(e){ if(msg){ msg.style.color='var(--bad)'; msg.textContent=e.message||'Greška'; } }
+}
+
+async function delBlock(id){
+  if(!confirm('Ukloniti blokadu? Termin postaje ponovno dostupan.')) return;
+  try{ await api('/api/blocks/'+id,{method:'DELETE'}); go('Blokade'); }
+  catch(e){ alert(e.message||'Greška'); }
 }
 
 async function settlePartner(ids, settled){

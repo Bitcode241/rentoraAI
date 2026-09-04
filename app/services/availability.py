@@ -40,6 +40,10 @@ def is_asset_available(db: Session, asset: Asset, start: datetime, end: datetime
         return False
     if _db_overlaps(db, asset.id, start, end, exclude_booking_id):
         return False
+    # weather / servicing / personal use — treated exactly like a booking
+    from app.services import block_service
+    if block_service.is_blocked(db, asset.id, asset.asset_type, start, end):
+        return False
     if not calendar_service.check_availability(asset.calendar_id, start, end):
         return False
     return True

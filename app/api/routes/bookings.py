@@ -144,7 +144,12 @@ def quick_booking(payload: dict, db: Session = Depends(get_db),
                      Asset.out_of_service == False)  # noqa: E712
              .all())
     free = []
+    from app.services import block_service
+    blocked = block_service.blocked_asset_ids(
+        db, tour.asset_type or asset_type, start, end, [u.id for u in units])
     for u in units:
+        if u.id in blocked:
+            continue
         clash = (db.query(Booking)
                  .filter(Booking.asset_id == u.id,
                          Booking.start_datetime < end,
@@ -156,8 +161,11 @@ def quick_booking(payload: dict, db: Session = Depends(get_db),
         if len(free) >= qty:
             break
     if len(free) < qty:
-        raise HTTPException(409, f"Nema dovoljno slobodnih jedinica "
-                                 f"({len(free)} od {qty}) u tom terminu.")
+        detail = (f"Nema dovoljno slobodnih jedinica ({len(free)} od {qty}) "
+                  f"u tom terminu.")
+        if blocked:
+            detail += " Dio flote je blokiran (vrijeme/servis)."
+        raise HTTPException(409, detail)
 
     cust = None
     if email:
