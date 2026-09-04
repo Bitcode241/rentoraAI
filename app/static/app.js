@@ -2034,8 +2034,12 @@ async function enablePush(){
     const perm=await Notification.requestPermission();
     if(perm!=='granted'){ say('Obavijesti nisu dopuštene — uključi ih u postavkama telefona za ovu app.',true); return; }
 
-    const reg=await navigator.serviceWorker.register('/static/sw.js');
-    await navigator.serviceWorker.ready;
+    const reg=await navigator.serviceWorker.register('/sw.js', {scope:'/'});
+    // don't hang forever if the worker never activates — tell the user instead
+    await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('service worker se nije aktivirao')),8000))
+    ]);
     const {key}=await api('/api/push/key');
     if(!key){ say('Server nije vratio ključ za obavijesti.',true); return; }
 

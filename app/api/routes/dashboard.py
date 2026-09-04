@@ -14,6 +14,25 @@ def admin():
     return FileResponse("app/static/admin.html", media_type="text/html")
 
 
+@router.get("/sw.js", include_in_schema=False)
+def service_worker():
+    """Served from the site root so its scope covers /admin.
+
+    A worker registered under /static/ only controls /static/ pages, which makes
+    navigator.serviceWorker.ready never resolve on the admin — push then silently
+    hangs. Serving it here fixes that.
+    """
+    return FileResponse("app/static/sw.js", media_type="text/javascript",
+                        headers={"Service-Worker-Allowed": "/",
+                                 "Cache-Control": "no-cache"})
+
+
+@router.get("/manifest.json", include_in_schema=False)
+def manifest():
+    return FileResponse("app/static/manifest.json",
+                        media_type="application/manifest+json")
+
+
 @router.get("/api/dashboard/selfcheck")
 def dashboard_selfcheck(db: Session = Depends(get_db), _=Depends(get_current_user)):
     """Health sweep — finds problems before guests do."""

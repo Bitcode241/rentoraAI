@@ -2779,3 +2779,51 @@ def test_blocks_prevent_booking(client, auth):
                               "name": "After Unblock", "phone": "+385999555666",
                               "start": f"{day}T14:00:00"})
     assert again.status_code == 200
+
+
+def test_service_worker_served_from_root(client):
+    """SW must be at / so its scope covers /admin — otherwise push silently hangs."""
+    r = client.get("/sw.js")
+    assert r.status_code == 200
+    assert "javascript" in r.headers.get("content-type", "")
+    assert r.headers.get("service-worker-allowed") == "/"
+    assert client.get("/manifest.json").status_code == 200
+    # the admin registers it from the root, not /static/
+    js = open("app/static/app.js", encoding="utf-8").read()
+    assert "register('/sw.js'" in js
+    assert "register('/static/sw.js'" not in js
+
+
+def test_rebuild_survives_bookings_linked_to_packages(client, auth):
+    """Regression: rebuilding the catalog must not fail when bookings still
+    reference the packages being deleted (Postgres enforces that FK)."""
+    from app.core.database import SessionLocal
+    from app.models.booking import Booking
+    from app.models.package import RentalPackage
+    from app.models.tour_type import TourType
+    from app.core.timeutil import to_local
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    t = db.query(TourType).filter(TourType.asset_type == "jetski").first()
+    tid = t.id
+    day = (to_local(datetime.now(timezone.utc)) + timedelta(days=12)).date()
+    db.close()
+    bid = client.post("/api/bookings/quick", headers=auth,
+                      json={"tour_id": tid, "qty": 1, "passengers": 2,
+                            "name": "Linked", "phone": "+385900111222",
+                            "start": f"{day}T10:00:00"}).json()["booking_ids"][0]
+    db = SessionLocal()
+    b = db.get(Booking, bid)
+    pkg = db.query(RentalPackage).filter(
+        RentalPackage.asset_id == b.asset_id).first()
+    b.package_id = pkg.id
+    tour_name = b.package_name
+    db.commit()
+    db.close()
+    r = client.post("/api/tours/rebuild?asset_type=jetski", headers=auth)
+    assert r.status_code == 200, "rebuild failed with a linked booking"
+    db = SessionLocal()
+    b2 = db.get(Booking, bid)
+    assert b2.package_id is None          # link cleared, not left dangling
+    assert b2.package_name == tour_name   # history preserved
+    db.close()

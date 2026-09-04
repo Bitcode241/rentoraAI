@@ -34,6 +34,19 @@ def match_tour_id(db: Session, asset_type: str, name: str, duration: int):
     return t.id if t else None
 
 
+def _detach_bookings(db: Session, package_ids: list):
+    """Bookings point at packages by FK. Before deleting packages we must clear
+    that reference or Postgres refuses the delete. The tour NAME is stored on the
+    booking as text, so history stays intact."""
+    if not package_ids:
+        return
+    from app.models.booking import Booking
+    (db.query(Booking)
+     .filter(Booking.package_id.in_(package_ids))
+     .update({Booking.package_id: None}, synchronize_session=False))
+    db.commit()
+
+
 def rebuild_units_from_catalog(db: Session, asset_type: str):
     """Make every unit's packages EXACTLY match the active catalog tours for this
     asset type: drop all current packages, then add one per catalog tour. This is
@@ -46,6 +59,9 @@ def rebuild_units_from_catalog(db: Session, asset_type: str):
     units = db.query(Asset).filter(Asset.asset_type == asset_type).all()
     unit_ids = [u.id for u in units]
     if unit_ids:
+        old_ids = [p.id for p in db.query(RentalPackage)
+                   .filter(RentalPackage.asset_id.in_(unit_ids)).all()]
+        _detach_bookings(db, old_ids)
         (db.query(RentalPackage)
          .filter(RentalPackage.asset_id.in_(unit_ids))
          .delete(synchronize_session=False))
@@ -77,15 +93,14 @@ def prune_orphan_packages(db: Session, asset_type: str = ""):
     if asset_type:
         asset_q = asset_q.filter(Asset.asset_type == asset_type)
     assets = {a.id: a.asset_type for a in asset_q.all()}
-    removed = 0
     pkgs = db.query(RentalPackage).all()
-    for p in pkgs:
-        atype = assets.get(p.asset_id)
-        if atype is None:
-            continue  # asset of another type (when filtering) — leave it
-        if (atype, p.name) not in valid:
-            db.delete(p)
-            removed += 1
+    doomed = [p for p in pkgs
+              if assets.get(p.asset_id) is not None
+              and (assets[p.asset_id], p.name) not in valid]
+    _detach_bookings(db, [p.id for p in doomed])
+    for p in doomed:
+        db.delete(p)
+    removed = len(doomed)
     db.commit()
     log.info("orphan_packages_pruned", removed=removed, asset_type=asset_type or "all")
     return removed
@@ -123,6 +138,10 @@ def remove_tour_from_units(db: Session, asset_type: str, name: str):
     units = db.query(Asset).filter(Asset.asset_type == asset_type).all()
     unit_ids = [u.id for u in units]
     if unit_ids:
+        doomed = (db.query(RentalPackage)
+                  .filter(RentalPackage.asset_id.in_(unit_ids),
+                          RentalPackage.name == name).all())
+        _detach_bookings(db, [p.id for p in doomed])
         (db.query(RentalPackage)
          .filter(RentalPackage.asset_id.in_(unit_ids),
                  RentalPackage.name == name)
