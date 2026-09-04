@@ -47,15 +47,23 @@ def calendar(start: Optional[str] = None, end: Optional[str] = None,
         custs = {c.id: c for c in db.query(Customer).filter(Customer.id.in_(cust_ids)).all()} if cust_ids else {}
         for b in bookings:
             c = custs.get(b.customer_id)
+            total = b.total_price or 0
+            # same money maths everywhere: online + cash taken on site
+            paid = (b.amount_paid or 0) + (getattr(b, "cash_collected", 0) or 0)
             events.append({
                 "id": b.id,
                 "asset_id": b.asset_id,
                 "title": (c.full_name if c else "—"),
+                "phone": (c.phone if c else "") or "",
                 "package": b.package_name or "",
                 "start": b.start_datetime.isoformat(),
                 "end": b.end_datetime.isoformat(),
                 "status": b.status,
-                "total_price": b.total_price,
+                "payment_status": b.payment_status,
+                "passengers": getattr(b, "passengers", 0) or 0,
+                "total_price": round(total, 2),
+                "paid": round(paid, 2),
+                "balance": round(max(total - paid, 0), 2),
             })
 
     return {

@@ -2687,3 +2687,51 @@ def test_detail_balance_includes_cash_and_can_be_corrected(client, auth):
     m3 = client.get(f"/api/bookings/{bid}/detail", headers=auth).json()["money"]
     assert m3["cash"] == 50
     assert m3["balance"] == round(price - 50, 2)
+
+
+def test_money_consistent_across_views(client, auth):
+    """Calendar, list and detail must all report the same paid/balance."""
+    from app.core.database import SessionLocal
+    from app.models.tour_type import TourType
+    from app.core.timeutil import to_local
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    t = db.query(TourType).filter(TourType.asset_type == "boat").first()
+    tid, price = t.id, t.price or 0
+    day = (to_local(datetime.now(timezone.utc)) + timedelta(days=5)).date()
+    db.close()
+    bid = client.post("/api/bookings/quick", headers=auth,
+                      json={"tour_id": tid, "qty": 1, "passengers": 6,
+                            "name": "Consistency", "phone": "+385988888888",
+                            "start": f"{day}T09:00:00",
+                            "paid": 100, "pay_method": "card"}).json()["booking_ids"][0]
+    client.post(f"/api/bookings/{bid}/cash", headers=auth, json={"amount": 50})
+    expected_paid, expected_bal = 150, round(price - 150, 2)
+    # detail
+    m = client.get(f"/api/bookings/{bid}/detail", headers=auth).json()["money"]
+    assert m["paid"] == expected_paid and m["balance"] == expected_bal
+    # list
+    row = next(x for x in client.get("/api/bookings", headers=auth).json()
+               if x["id"] == bid)
+    assert row["settled"] == expected_paid and row["balance"] == expected_bal
+    # calendar
+    cal = client.get(f"/api/calendar?start={day}&days=2", headers=auth).json()
+    ev = next((e for e in cal["events"] if e["id"] == bid), None)
+    assert ev, "booking missing from calendar"
+    assert ev["paid"] == expected_paid and ev["balance"] == expected_bal
+
+
+def test_selfcheck_reports_problems(client, auth):
+    """Self-check runs and flags real issues with a suggested fix."""
+    r = client.get("/api/dashboard/selfcheck", headers=auth)
+    assert r.status_code == 200
+    d = r.json()
+    assert d["total"] > 5
+    names = [c["name"] for c in d["checks"]]
+    assert any("Naplata" in n for n in names)
+    assert any("Dvostruke" in n for n in names)
+    assert any("Brodovi" in n for n in names)   # boats checked like jets
+    for c in d["checks"]:
+        assert c["status"] in ("ok", "warn", "fail")
+        if c["status"] == "fail":
+            assert c["fix"], f"failing check '{c['name']}' has no fix hint"

@@ -14,6 +14,13 @@ def admin():
     return FileResponse("app/static/admin.html", media_type="text/html")
 
 
+@router.get("/api/dashboard/selfcheck")
+def dashboard_selfcheck(db: Session = Depends(get_db), _=Depends(get_current_user)):
+    """Health sweep — finds problems before guests do."""
+    from app.services import selfcheck
+    return selfcheck.run_checks(db)
+
+
 @router.get("/api/dashboard/partners")
 def dashboard_partners(days: int = 90, db: Session = Depends(get_db),
                        _=Depends(get_current_user)):
@@ -281,7 +288,7 @@ def dashboard_overview(days: int = 7, db: Session = Depends(get_db),
         a = assets.get(b.asset_id)
         c = custs.get(b.customer_id)
         is_partner = bool(a and provider_service.is_partner(a))
-        paid = b.amount_paid or 0
+        paid = (b.amount_paid or 0) + (getattr(b, "cash_collected", 0) or 0)
         total = b.total_price or 0
         # to collect on site = total - already paid (for own), or pay_on_site (partner)
         if is_partner and a:

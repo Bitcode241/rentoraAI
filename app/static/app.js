@@ -8,7 +8,7 @@ const NAV_GROUPS = [
   {label:'Novac', items:['Novac','Partneri','Izvori']},
   {label:'Ponuda', items:['Ture','Flota','Transferi','Dodaci','Widget']},
   {label:'Gosti', items:['Gosti','Poruke']},
-  {label:'Sustav', items:['Postavke','Email računi','Log']},
+  {label:'Sustav', items:['Postavke','Provjera','Email računi','Log']},
 ];
 const PAGES = NAV_GROUPS.flatMap(g=>g.items);
 const SUBS = {
@@ -27,6 +27,7 @@ const SUBS = {
   'Gosti':'Profili gostiju i povijest',
   'Poruke':'Mailovi gostiju i odgovori',
   'Postavke':'Brendovi, lokacije, pravila, naplata',
+  'Provjera':'Traži probleme prije nego ih gost nađe',
   'Email računi':'Sandučići koje AI prati',
   'Log':'Sve promjene u sustavu — tvoja zaštita',
 };
@@ -287,6 +288,42 @@ const RENDER = {
             </div>
           </div>`).join('')}
       </div>`}`;
+  },
+  'Provjera': async (v)=>{
+    v.innerHTML='<div class="empty">Provjeravam sustav…</div>';
+    const d=await api('/api/dashboard/selfcheck');
+    const col={ok:'var(--good)',warn:'#b06f00',fail:'var(--bad)'};
+    const ico={ok:'✓',warn:'!',fail:'✕'};
+    const bgs={ok:'#e8f5ee',warn:'#fff8e6',fail:'#fdecea'};
+    v.innerHTML=`
+      <div class="panel" style="padding:16px;margin-bottom:16px;max-width:420px;
+        border-left:4px solid ${d.healthy?'var(--good)':'var(--bad)'}">
+        <div style="font-size:20px;font-weight:800">
+          ${d.healthy?'Sve radi ✓':`${d.fails} problem${d.fails===1?'':'a'} za riješiti`}</div>
+        <div style="font-size:13px;color:var(--mut);margin-top:2px">
+          ${d.total} provjera · ${d.warns} upozorenja · ${fmt(d.at)}</div>
+        <button class="btn btn-sm" style="margin-top:10px" onclick="go('Provjera')">Provjeri ponovno</button>
+      </div>
+      ${['fail','warn','ok'].map(s=>{
+        const items=d.checks.filter(c=>c.status===s);
+        if(!items.length) return '';
+        const title={fail:'Treba popraviti',warn:'Vrijedi provjeriti',ok:'U redu'}[s];
+        return `<div style="margin-bottom:16px">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;
+            color:var(--mut);font-weight:700;margin-bottom:8px">${title}</div>
+          ${items.map(c=>`
+            <div class="panel" style="padding:12px 14px;margin-bottom:8px;background:${bgs[s]}">
+              <div style="display:flex;gap:10px;align-items:flex-start">
+                <span style="color:${col[s]};font-weight:800;font-size:15px">${ico[s]}</span>
+                <div style="min-width:0;flex:1">
+                  <div style="font-weight:600;font-size:13.5px">${c.name}</div>
+                  <div style="font-size:12.5px;color:var(--mut);margin-top:2px">${c.detail||''}</div>
+                  ${c.fix?`<div style="font-size:12.5px;margin-top:5px"><b>→ ${c.fix}</b></div>`:''}
+                </div>
+              </div>
+            </div>`).join('')}
+        </div>`;
+      }).join('')}`;
   },
   'Partneri': async (v)=>{
     const d=await api('/api/dashboard/partners?days=90');
