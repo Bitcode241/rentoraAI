@@ -1790,19 +1790,65 @@ async function saveBookingEdit(id){
 }
 
 async function recordCash(id, suggested){
-  const v=prompt('Koliko je gost platio u gotovini (EUR)?', suggested||'');
-  if(v===null) return;
-  const amount=parseFloat(String(v).replace(',','.'));
-  if(isNaN(amount)||amount<0){ alert('Neispravan iznos.'); return; }
+  let d=null;
+  try{ d=await api('/api/bookings/'+id+'/detail'); }catch(e){ alert(e.message); return; }
+  const m=d.money||{};
+  const cash=m.cash||0;
+  openModal(`
+    <h3 style="margin-top:0">Naplata gotovinom</h3>
+    <div style="background:var(--sand);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px">
+      <div style="display:flex;justify-content:space-between"><span style="color:var(--mut)">Ukupna cijena</span><b>${money(m.total)}</b></div>
+      <div style="display:flex;justify-content:space-between"><span style="color:var(--mut)">Uplaćeno online</span><b>${money(m.online||0)}</b></div>
+      <div style="display:flex;justify-content:space-between"><span style="color:var(--mut)">Već uzeto u gotovini</span><b>${money(cash)}</b></div>
+      <div style="display:flex;justify-content:space-between;margin-top:5px;padding-top:6px;border-top:1px solid var(--line)">
+        <span style="color:var(--mut)">Ostaje</span>
+        <b style="color:${m.balance>0?'#b06f00':'var(--good)'}">${m.balance>0?money(m.balance):'✓ podmireno'}</b></div>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:4px">
+      <input type="radio" name="cashmode" value="add" checked style="width:auto" onchange="rcMode()"> Dodaj uplatu</label>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:10px">
+      <input type="radio" name="cashmode" value="set" style="width:auto" onchange="rcMode()"> Ispravi ukupnu gotovinu (ako sam pogriješio)</label>
+    <label id="rc_lbl">Iznos koji gost sada daje (€)</label>
+    <input id="rc_amt" type="number" min="0" step="1" value="${m.balance>0?m.balance:''}">
+    <div id="rc_hint" style="font-size:12px;color:var(--mut);margin-top:6px"></div>
+    <div id="rc_msg" style="font-size:13px;margin-top:8px"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn" onclick="saveCash(${id})">Spremi</button>
+      <button class="btn btn-ghost" onclick="openDetail(${id})">Odustani</button>
+    </div>`);
+  window.__rcCash=cash;
+  rcMode();
+}
+
+function rcMode(){
+  const set=document.querySelector('input[name=cashmode][value=set]').checked;
+  const lbl=document.getElementById('rc_lbl');
+  const hint=document.getElementById('rc_hint');
+  const amt=document.getElementById('rc_amt');
+  if(set){
+    lbl.textContent='Točan ukupan iznos gotovine (€)';
+    hint.textContent=`Zamijenit će dosadašnjih ${money(window.__rcCash||0)}. Koristi ako je greškom upisano dvaput.`;
+    amt.value=window.__rcCash||0;
+  }else{
+    lbl.textContent='Iznos koji gost sada daje (€)';
+    hint.textContent='Zbraja se na dosadašnju gotovinu.';
+  }
+}
+
+async function saveCash(id){
+  const msg=document.getElementById('rc_msg');
+  const set=document.querySelector('input[name=cashmode][value=set]').checked;
+  const amount=parseFloat(String(val('rc_amt')).replace(',','.'));
+  if(isNaN(amount)||amount<0){ if(msg){msg.style.color='var(--bad)';msg.textContent='Neispravan iznos.';} return; }
   try{
     const r=await api('/api/bookings/'+id+'/cash',{method:'POST',
-      body:JSON.stringify({amount})});
+      body:JSON.stringify({amount, replace:set})});
     closeModal();
-    go('Rezervacije');
+    go('Danas');
     setTimeout(()=>alert(r.balance>0
-      ? `Zabilježeno ${amount.toFixed(2)} €. Ostaje još ${r.balance.toFixed(2)} €.`
-      : `Zabilježeno ${amount.toFixed(2)} € — rezervacija je podmirena ✓`), 200);
-  }catch(e){ alert(e.message||'Greška'); }
+      ? `Spremljeno. Ostaje još ${r.balance.toFixed(2)} €.`
+      : 'Spremljeno — rezervacija je podmirena ✓'), 200);
+  }catch(e){ if(msg){msg.style.color='var(--bad)';msg.textContent=e.message||'Greška';} }
 }
 
 async function openThread(id){

@@ -2655,3 +2655,35 @@ def test_cash_shows_in_list_and_adds_up(client, auth):
     rows3 = client.get("/api/bookings", headers=auth).json()
     row3 = next(x for x in rows3 if x["id"] == bid)
     assert row3["settled"] == 5
+
+
+def test_detail_balance_includes_cash_and_can_be_corrected(client, auth):
+    """Detail view must count cash, and a double entry must be fixable."""
+    from app.core.database import SessionLocal
+    from app.models.tour_type import TourType
+    from app.core.timeutil import to_local
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    t = db.query(TourType).filter(TourType.asset_type == "jetski").first()
+    price, tid = t.price or 0, t.id
+    day = (to_local(datetime.now(timezone.utc)) + timedelta(days=9)).date()
+    db.close()
+    bid = client.post("/api/bookings/quick", headers=auth,
+                      json={"tour_id": tid, "qty": 1, "passengers": 2,
+                            "name": "Fix Cash", "phone": "+385977777777",
+                            "start": f"{day}T10:00:00"}).json()["booking_ids"][0]
+    # cash counts towards the balance in the detail view
+    client.post(f"/api/bookings/{bid}/cash", headers=auth, json={"amount": 50})
+    m = client.get(f"/api/bookings/{bid}/detail", headers=auth).json()["money"]
+    assert m["cash"] == 50
+    assert m["balance"] == round(price - 50, 2)
+    # entered twice by mistake
+    client.post(f"/api/bookings/{bid}/cash", headers=auth, json={"amount": 50})
+    m2 = client.get(f"/api/bookings/{bid}/detail", headers=auth).json()["money"]
+    assert m2["cash"] == 100
+    # correcting with replace restores the right figure
+    client.post(f"/api/bookings/{bid}/cash", headers=auth,
+                json={"amount": 50, "replace": True})
+    m3 = client.get(f"/api/bookings/{bid}/detail", headers=auth).json()["money"]
+    assert m3["cash"] == 50
+    assert m3["balance"] == round(price - 50, 2)

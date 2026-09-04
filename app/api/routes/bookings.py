@@ -347,7 +347,8 @@ def booking_detail(booking_id: int, db: Session = Depends(get_db),
     c = db.get(Customer, b.customer_id) if b.customer_id else None
     a = db.get(Asset, b.asset_id) if b.asset_id else None
     total = b.total_price or 0
-    paid = b.amount_paid or 0
+    cash = getattr(b, "cash_collected", 0) or 0
+    paid = (b.amount_paid or 0) + cash      # everything actually received
     balance = round(max(total - paid, 0), 2)
     # extras were recorded as human-readable lines in notes at booking time
     extras = []
@@ -391,6 +392,8 @@ def booking_detail(booking_id: int, db: Session = Depends(get_db),
         "money": {
             "total": round(total, 2),
             "paid": round(paid, 2),
+            "online": round(b.amount_paid or 0, 2),
+            "cash": round(getattr(b, "cash_collected", 0) or 0, 2),
             "balance": balance,
             "deposit_amount": round(b.deposit_amount or 0, 2),
             "currency": "EUR",
@@ -484,10 +487,10 @@ def partner_voucher(booking_id: int, token: str = "",
         st_summary = st["summary"]
     gname = (cust.full_name if cust and cust.full_name and
              cust.full_name != (cust.email or "") else "")
-    # what the partner must collect from the guest in cash = total - already paid to us
+    # what the partner must collect from the guest = total - everything we took
     total = b.total_price or 0
-    paid = b.amount_paid or 0
-    balance = max(total - paid, 0) if paid > 0 else 0
+    paid = (b.amount_paid or 0) + (getattr(b, "cash_collected", 0) or 0)
+    balance = max(total - paid, 0) if paid > 0 else total
     from app.services import settings_service, provider_service
     biz = settings_service.brand_for_type(db, asset.asset_type if asset else "")
 
