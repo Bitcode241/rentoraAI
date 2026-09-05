@@ -1,9 +1,10 @@
 from sqlalchemy import String, Integer, DateTime, func, Text, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
+from app.core.tenancy import TenantMixin
 
 
-class EmailThread(Base):
+class EmailThread(Base, TenantMixin):
     __tablename__ = "email_threads"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -18,7 +19,7 @@ class EmailThread(Base):
     emails = relationship("EmailMessage", back_populates="thread", order_by="EmailMessage.created_at")
 
 
-class EmailMessage(Base):
+class EmailMessage(Base, TenantMixin):
     __tablename__ = "email_messages"
 
     id: Mapped[int] = mapped_column(primary_key=True)

@@ -1,4 +1,5 @@
 from app.models.user import User
+from app.models.tenant import Tenant
 from app.models.asset import Asset
 from app.models.package import RentalPackage
 from app.models.transfer import TransferZone
@@ -22,3 +23,5 @@ from app.models.transfer import TransferRadius
 from app.models.tour_type import TourType
 from app.models.push import PushSubscription
 from app.models.block import Block
+from app.models.waiver import WaiverTemplate, WaiverSignature
+from app.models.platform import PlatformTerms, PlatformAcceptance

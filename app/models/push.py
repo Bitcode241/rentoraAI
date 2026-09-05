@@ -2,9 +2,10 @@ from sqlalchemy import String, Integer, Text, DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.core.tenancy import TenantMixin
 
 
-class PushSubscription(Base):
+class PushSubscription(Base, TenantMixin):
     """One row per device that opted in to push notifications.
 
     The browser gives us an endpoint URL plus two keys; we store them so the

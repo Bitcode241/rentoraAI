@@ -1,9 +1,10 @@
 from sqlalchemy import String, Boolean, DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
+from app.core.tenancy import TenantMixin
 
 
-class User(Base):
+class User(Base, TenantMixin):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)

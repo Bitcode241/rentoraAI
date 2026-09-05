@@ -1,9 +1,10 @@
 from sqlalchemy import String, Integer, Float, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
+from app.core.tenancy import TenantMixin
 
 
-class TransferZone(Base):
+class TransferZone(Base, TenantMixin):
     """A transfer destination zone with one-way prices per vehicle type.
 
     Vehicle selection by passenger count:
@@ -23,7 +24,7 @@ class TransferZone(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
-class TransferRadius(Base):
+class TransferRadius(Base, TenantMixin):
     """GPS radius-based transfer pricing. A base point (e.g. Lapadska obala 4) and
     distance tiers: up to `max_km` from the base costs `car_price`/`van_price`
     one-way. The system geocodes the guest's location, measures distance to the

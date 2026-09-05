@@ -22,6 +22,11 @@ else:
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# Every ORM SELECT is filtered by the current tenant. Installed once, here, so no
+# individual query has to remember it.
+from app.core import tenancy as _tenancy  # noqa: E402
+_tenancy.install(SessionLocal)
+
 
 class Base(DeclarativeBase):
     pass

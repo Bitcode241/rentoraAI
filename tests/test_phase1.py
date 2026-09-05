@@ -2909,3 +2909,151 @@ def test_mypos_checkout_flow(client, auth):
     db = SessionLocal()
     settings_service.set(db, "payment_provider", "stripe")
     db.commit(); db.close()
+
+
+def test_waiver_text_is_owner_written_and_versioned(client, auth):
+    """Terms are the owner's text, per asset type and language — and editing them
+    must never rewrite what a guest already signed."""
+    from app.core.database import SessionLocal
+    from app.models.tour_type import TourType
+    from app.services import waiver_service as ws
+    from app.core.timeutil import to_local
+    from datetime import datetime, timezone, timedelta
+    # owner writes their own jet ski terms
+    r = client.put("/api/waivers/templates", headers=auth,
+                   json={"asset_type": "jetski", "lang": "en",
+                         "title": "Jet Ski Terms",
+                         "body": "Renter is liable up to EUR 500.",
+                         "require_document": True})
+    assert r.status_code == 200
+    assert r.json()["template"]["version"] == 1
+    # boats get a different document
+    rb = client.put("/api/waivers/templates", headers=auth,
+                    json={"asset_type": "boat", "lang": "en",
+                          "title": "Boat Terms", "body": "Skipper rules apply."})
+    assert rb.json()["template"]["asset_type"] == "boat"
+    db = SessionLocal()
+    t = db.query(TourType).filter(TourType.asset_type == "jetski").first()
+    tid = t.id
+    day = (to_local(datetime.now(timezone.utc)) + timedelta(days=14)).date()
+    db.close()
+    bid = client.post("/api/bookings/quick", headers=auth,
+                      json={"tour_id": tid, "qty": 1, "passengers": 2,
+                            "name": "Signer", "phone": "+385900222333",
+                            "start": f"{day}T10:00:00"}).json()["booking_ids"][0]
+    # guest signs
+    db = SessionLocal()
+    tpl = ws.get_template(db, "jetski", "en")
+    ws.record_signature(db, booking_id=bid, template=tpl, signer_name="Ana Horvat",
+                        signer_document="HR123", signature_png="data:image/png;base64,AAA")
+    db.close()
+    # owner later raises the liability
+    r2 = client.put("/api/waivers/templates", headers=auth,
+                    json={"asset_type": "jetski", "lang": "en",
+                          "title": "Jet Ski Terms",
+                          "body": "Renter is liable up to EUR 2000."})
+    assert r2.json()["template"]["version"] == 2
+    # the signed record still shows the ORIGINAL wording
+    info = client.get(f"/api/waivers/booking/{bid}", headers=auth).json()
+    assert info["signed"] is True
+    assert "EUR 500" in info["signature"]["body"]
+    assert "EUR 2000" not in info["signature"]["body"]
+    assert info["signature"]["version"] == 1
+    # signing requires a name and a signature
+    db = SessionLocal()
+    tpl2 = ws.get_template(db, "jetski", "en")
+    try:
+        ws.record_signature(db, booking_id=bid, template=tpl2, signer_name="",
+                            signature_png="x")
+        assert False, "empty name accepted"
+    except ValueError:
+        pass
+    db.close()
+
+
+def test_platform_terms_acceptance_and_reacceptance(client, auth):
+    """Operators accept the platform terms; changing them forces re-acceptance,
+    and each acceptance keeps a copy of the wording that was in force."""
+    # nothing written yet -> nothing to accept
+    t0 = client.get("/api/platform/terms?lang=hr", headers=auth).json()
+    assert t0["needs_acceptance"] is False
+    # owner writes the terms
+    r = client.put("/api/platform/terms", headers=auth,
+                   json={"lang": "hr", "title": "Uvjeti korištenja",
+                         "body": "Naknada 4% po rezervaciji."})
+    assert r.json()["version"] == 1
+    t1 = client.get("/api/platform/terms?lang=hr", headers=auth).json()
+    assert t1["needs_acceptance"] is True
+    # accept
+    assert client.post("/api/platform/accept", headers=auth,
+                       json={"lang": "hr"}).status_code == 200
+    t2 = client.get("/api/platform/terms?lang=hr", headers=auth).json()
+    assert t2["needs_acceptance"] is False
+    assert t2["accepted"]["version"] == 1
+    # changing the terms bumps the version and requires accepting again
+    r2 = client.put("/api/platform/terms", headers=auth,
+                    json={"lang": "hr", "title": "Uvjeti korištenja",
+                          "body": "Naknada 6% po rezervaciji."})
+    assert r2.json()["version"] == 2
+    t3 = client.get("/api/platform/terms?lang=hr", headers=auth).json()
+    assert t3["needs_acceptance"] is True
+    # the earlier acceptance still records the old wording
+    accs = client.get("/api/platform/acceptances", headers=auth).json()["acceptances"]
+    assert any(a["version"] == 1 for a in accs)
+    # can't accept when there are no terms in that language
+    assert client.post("/api/platform/accept", headers=auth,
+                       json={"lang": "zz"}).status_code in (200, 400)
+
+
+def test_tenant_isolation():
+    """The whole point of multi-tenancy: one business must never see another's
+    data, and the filter must apply without each query remembering it."""
+    from app.core.database import SessionLocal
+    from app.core.tenancy import all_tenants, as_tenant
+    from app.models.tenant import Tenant
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    db = SessionLocal()
+    with all_tenants():
+        if not db.query(Tenant).filter(Tenant.id == 99).first():
+            db.add(Tenant(id=99, name="Other Rentals", slug="other"))
+            db.commit()
+    # tenant 99 adds its own boat and customer
+    with as_tenant(99):
+        db.add(Asset(name="Their Boat", asset_type="boat", capacity=8,
+                     active=True, tenant_id=99))
+        db.add(Customer(full_name="Their Guest", email="their@example.com",
+                        tenant_id=99))
+        db.commit()
+        assert db.query(Asset).count() == 1
+        assert all(a.name == "Their Boat" for a in db.query(Asset).all())
+    db.expire_all()
+    # tenant 1 sees its own fleet and none of theirs
+    with as_tenant(1):
+        names = [a.name for a in db.query(Asset).all()]
+        assert "Their Boat" not in names
+        assert len(names) > 1
+        assert not any(c.email == "their@example.com"
+                       for c in db.query(Customer).all())
+    db.expire_all()
+    # platform level sees everything — but only when explicitly asked
+    with all_tenants():
+        assert any(a.name == "Their Boat" for a in db.query(Asset).all())
+    db.expire_all()
+    db.close()
+
+
+def test_settings_are_per_tenant():
+    """Two businesses must be able to hold different values for the same key."""
+    from app.core.database import SessionLocal
+    from app.core.tenancy import as_tenant
+    from app.services import settings_service
+    db = SessionLocal()
+    with as_tenant(1):
+        settings_service.set(db, "brand_jetski", "Jetski Dubrovnik")
+    with as_tenant(99):
+        settings_service.set(db, "brand_jetski", "Other Brand")
+        assert settings_service.get(db, "brand_jetski") == "Other Brand"
+    with as_tenant(1):
+        assert settings_service.get(db, "brand_jetski") == "Jetski Dubrovnik"
+    db.close()

@@ -49,9 +49,14 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             raise cred_exc
     except JWTError:
         raise cred_exc
-    user = db.query(User).filter(User.username == username).first()
+    # look the user up without tenant filtering — we don't know the tenant yet
+    from app.core.tenancy import all_tenants, set_tenant
+    with all_tenants():
+        user = db.query(User).filter(User.username == username).first()
     if user is None or not user.active:
         raise cred_exc
+    # from here on, every query in this request is scoped to the user's business
+    set_tenant(getattr(user, "tenant_id", None) or 1)
     return user
 
 

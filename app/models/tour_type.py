@@ -10,9 +10,10 @@ from sqlalchemy import String, Integer, Float, Boolean, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.core.tenancy import TenantMixin
 
 
-class TourType(Base):
+class TourType(Base, TenantMixin):
     __tablename__ = "tour_types"
 
     id: Mapped[int] = mapped_column(primary_key=True)

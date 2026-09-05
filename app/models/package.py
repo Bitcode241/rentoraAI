@@ -1,9 +1,10 @@
 from sqlalchemy import String, Integer, Float, Boolean, ForeignKey, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
+from app.core.tenancy import TenantMixin
 
 
-class RentalPackage(Base):
+class RentalPackage(Base, TenantMixin):
     """A bookable price package for an asset.
 
     Examples:

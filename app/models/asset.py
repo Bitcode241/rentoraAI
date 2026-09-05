@@ -1,9 +1,10 @@
 from sqlalchemy import String, Integer, Float, Boolean, DateTime, func, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
+from app.core.tenancy import TenantMixin
 
 
-class Asset(Base):
+class Asset(Base, TenantMixin):
     __tablename__ = "assets"
 
     id: Mapped[int] = mapped_column(primary_key=True)

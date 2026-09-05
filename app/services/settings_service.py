@@ -87,17 +87,27 @@ def widget_accent(db: Session, asset_type: str = "", fallback: str = "") -> str:
     return legacy or fallback or defaults.get(t, "#0ea5b7")
 
 
+def _tid():
+    from app.core.tenancy import get_tenant, DEFAULT_TENANT_ID
+    return get_tenant() or DEFAULT_TENANT_ID
+
+
 def get(db: Session, key: str, default=None):
-    row = db.get(AppSetting, key)
+    row = (db.query(AppSetting)
+           .filter(AppSetting.key == key, AppSetting.tenant_id == _tid())
+           .first())
     return row.value if row else default
 
 
 def set(db: Session, key: str, value: str):
-    row = db.get(AppSetting, key)
+    tid = _tid()
+    row = (db.query(AppSetting)
+           .filter(AppSetting.key == key, AppSetting.tenant_id == tid)
+           .first())
     if row:
         row.value = value
     else:
-        db.add(AppSetting(key=key, value=value))
+        db.add(AppSetting(key=key, value=value, tenant_id=tid))
     db.commit()
 
 

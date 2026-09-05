@@ -1,9 +1,10 @@
 from sqlalchemy import String, Integer, Float, Boolean, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
+from app.core.tenancy import TenantMixin
 
 
-class AddOn(Base):
+class AddOn(Base, TenantMixin):
     """An optional extra a guest can add to a booking (GoPro, fuel, instructor,
     extra hour, transfer to beach...). Configured in admin. Applies to an asset
     type ('jetski','boat','transfer') or to all ('').

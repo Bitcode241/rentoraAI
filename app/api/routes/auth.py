@@ -12,7 +12,10 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 @router.post("/login", response_model=Token)
 def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.username == form.username).first()
+    # login happens before we know the tenant, so look up across all of them
+    from app.core.tenancy import all_tenants, set_tenant
+    with all_tenants():
+        user = db.query(User).filter(User.username == form.username).first()
     if not user or not verify_password(form.password, user.hashed_password):
         raise HTTPException(401, "Incorrect username or password")
     if not user.active:
@@ -22,7 +25,10 @@ def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
 
 @router.post("/users", response_model=UserOut, dependencies=[Depends(require_admin)])
 def create_user(payload: UserCreate, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.username == payload.username).first():
+    from app.core.tenancy import all_tenants
+    with all_tenants():
+        _exists = db.query(User).filter(User.username == payload.username).first()
+    if _exists:
         raise HTTPException(409, "Username already exists")
     user = User(username=payload.username, email=payload.email, role=payload.role,
                 hashed_password=hash_password(payload.password))

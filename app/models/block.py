@@ -2,9 +2,10 @@ from sqlalchemy import String, Integer, DateTime, Boolean, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.core.tenancy import TenantMixin
 
 
-class Block(Base):
+class Block(Base, TenantMixin):
     """A period when a unit (or the whole fleet) cannot be booked.
 
     Covers the three real cases: bad weather, servicing, and the owner keeping a

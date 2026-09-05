@@ -8,7 +8,7 @@ const NAV_GROUPS = [
   {label:'Novac', items:['Novac','Partneri','Izvori']},
   {label:'Ponuda', items:['Ture','Flota','Transferi','Dodaci','Widget']},
   {label:'Gosti', items:['Gosti','Poruke']},
-  {label:'Sustav', items:['Postavke','Provjera','Email računi','Log']},
+  {label:'Sustav', items:['Postavke','Uvjeti','Uvjeti platforme','Provjera','Email računi','Log']},
 ];
 const PAGES = NAV_GROUPS.flatMap(g=>g.items);
 const SUBS = {
@@ -28,6 +28,8 @@ const SUBS = {
   'Gosti':'Profili gostiju i povijest',
   'Poruke':'Mailovi gostiju i odgovori',
   'Postavke':'Brendovi, lokacije, pravila, naplata',
+  'Uvjeti':'Što gost potpisuje prije izlaska',
+  'Uvjeti platforme':'Što vlasnik rentala prihvaća za korištenje',
   'Provjera':'Traži probleme prije nego ih gost nađe',
   'Email računi':'Sandučići koje AI prati',
   'Log':'Sve promjene u sustavu — tvoja zaštita',
@@ -73,7 +75,8 @@ function boot(){
   nav.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>go(a.dataset.p)));
   go('Danas');
   refreshBadges();
-  setInterval(refreshBadges, 120000);   // refresh every 2 min
+  setInterval(refreshBadges, 120000);
+  checkPlatformTerms();   // refresh every 2 min
 }
 function navLink(p){
   return `<a data-p="${p.replace(/"/g,'&quot;')}"><span class="dot"></span>${p}</a>`;
@@ -357,6 +360,84 @@ const RENDER = {
           </footer>
         </article>`).join('')}</div>`}`;
     window.__assets = assets||[];
+  },
+  'Uvjeti platforme': async (v)=>{
+    const [t, acc] = await Promise.all([
+      api('/api/platform/terms?lang=hr'),
+      api('/api/platform/acceptances').catch(()=>({acceptances:[]}))
+    ]);
+    v.innerHTML=`
+      <p style="color:var(--mut);font-size:13px;margin-top:0">Uvjeti koje <b>vlasnik rentala</b> prihvaća da bi koristio Rentoru.
+      Svaka izmjena teksta podiže verziju i traži novo prihvaćanje od svih korisnika.</p>
+      <div class="panel" style="max-width:760px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <b style="font-size:14px">Tekst uvjeta</b>
+          <span style="font-size:12px;color:var(--mut)">${t.exists?('verzija '+t.version):'još nije napisano'}</span>
+        </div>
+        <label>Naslov</label>
+        <input id="pt_title" value="${(t.title||'').replace(/"/g,'&quot;')}" placeholder="Uvjeti korištenja RentoraAI">
+        <label>Tekst</label>
+        <textarea id="pt_body" style="width:100%;height:280px;resize:vertical;font-size:13px;line-height:1.5"
+          placeholder="Ovdje ide tekst koji ti napiše odvjetnik…">${(t.body||'').replace(/</g,'&lt;')}</textarea>
+        <div class="save-bar">
+          <button class="btn" onclick="savePlatformTerms()">Spremi uvjete</button>
+          <span id="pt_msg" style="font-size:13px"></span>
+        </div>
+      </div>
+      <div class="panel" style="max-width:760px;margin-top:16px">
+        <b style="font-size:14px">Tko je prihvatio</b>
+        ${!acc.acceptances.length?'<div class="empty" style="padding:16px">Još nitko.</div>':
+        `<table style="width:100%;margin-top:10px;font-size:13px">
+          <thead><tr style="text-align:left;color:var(--mut);font-size:11px">
+            <th>Korisnik</th><th>Tvrtka</th><th>Verzija</th><th>Kada</th></tr></thead>
+          <tbody>${acc.acceptances.map(a=>`<tr style="border-top:1px solid var(--line)">
+            <td data-l="Korisnik">${a.username}</td><td data-l="Tvrtka">${a.business||'—'}</td>
+            <td data-l="Verzija">v${a.version}</td><td data-l="Kada">${fmt(a.at)}</td></tr>`).join('')}
+          </tbody></table>`}
+      </div>
+      <p style="font-size:12px;color:var(--mut);max-width:760px;margin-top:12px">
+        Sustav pohranjuje tko je što i kada prihvatio, uključujući kopiju teksta u tom trenutku.
+        Sam sadržaj uvjeta i njihovu pravnu dostatnost napiši s odvjetnikom.</p>`;
+  },
+  'Uvjeti': async (v)=>{
+    const d=await api('/api/waivers/templates');
+    const types=[['jetski','Jetovi'],['boat','Brodovi'],['transfer','Transferi']];
+    const cur=window.__wvSel||{type:'jetski',lang:'en'};
+    window.__wvSel=cur;
+    const tpl=d.templates.find(t=>t.asset_type===cur.type&&t.lang===cur.lang);
+    const pick=(t,l)=>{ window.__wvSel={type:t,lang:l}; go('Uvjeti'); };
+    window.__wvPick=pick;
+    v.innerHTML=`
+      <p style="color:var(--mut);font-size:13px;margin-top:0">Uvjeti koje gost potpisuje prije izlaska. Ti pišeš tekst — poseban za svaki tip i jezik.
+      Izmjena podiže verziju; već potpisani dokumenti zadržavaju svoj originalni tekst.</p>
+      <div class="toolbar" style="margin-bottom:6px">
+        ${types.map(([k,l])=>`<button class="btn btn-sm ${cur.type===k?'':'btn-ghost'}"
+          onclick="__wvPick('${k}','${cur.lang}')">${l}</button>`).join('')}
+      </div>
+      <div class="toolbar" style="margin-bottom:14px">
+        ${d.languages.map(l=>`<button class="btn btn-sm ${cur.lang===l?'':'btn-ghost'}"
+          onclick="__wvPick('${cur.type}','${l}')">${l.toUpperCase()}</button>`).join('')}
+        ${tpl?`<span style="font-size:12px;color:var(--mut)">verzija ${tpl.version}</span>`:
+              '<span style="font-size:12px;color:var(--warn)">još nije napisano</span>'}
+      </div>
+      <div class="panel" style="max-width:720px">
+        <label>Naslov</label>
+        <input id="wv_title" value="${(tpl?tpl.title:'').replace(/"/g,'&quot;')}"
+          placeholder="npr. Uvjeti najma jet skija">
+        <label>Tekst uvjeta</label>
+        <textarea id="wv_body" style="width:100%;height:300px;resize:vertical;font-size:13px;line-height:1.5"
+          placeholder="Upiši svoje uvjete…&#10;&#10;1. Minimalna dob 18 godina.&#10;2. Zabranjen alkohol.&#10;3. Najmoprimac odgovara za štetu do XXX EUR.">${tpl?(tpl.body||'').replace(/</g,'&lt;'):''}</textarea>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:12px">
+          <input type="checkbox" id="wv_doc" style="width:auto" ${!tpl||tpl.require_document?'checked':''}>
+          Traži broj osobne/putovnice</label>
+        <div class="save-bar">
+          <button class="btn" onclick="saveWaiver()">Spremi uvjete</button>
+          <span id="wv_msg" style="font-size:13px"></span>
+        </div>
+      </div>
+      <p style="font-size:12px;color:var(--mut);max-width:720px;margin-top:12px">
+        Tekst uvjeta i njihovu pravnu valjanost potvrdi sa svojim odvjetnikom — sustav
+        pohranjuje što je potpisano, ali ne procjenjuje je li sadržaj pravno dostatan.</p>`;
   },
   'Provjera': async (v)=>{
     v.innerHTML='<div class="empty">Provjeravam sustav…</div>';
@@ -1722,6 +1803,7 @@ async function openDetail(id){
 
       <div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap">
         ${m.balance>0?`<button class="btn btn-sm" onclick="recordCash(${d.id},${m.balance})">Naplaćeno u gotovini</button>`:''}
+        <button class="btn btn-sm btn-ghost" onclick="openWaiver(${d.id})">Uvjeti / potpis</button>
         <button class="btn btn-sm btn-ghost" onclick="editBooking(${d.id})">Uredi rezervaciju</button>
         ${wa?`<a class="btn btn-sm btn-ghost" href="https://wa.me/${wa}" target="_blank" style="text-decoration:none">WhatsApp gostu</a>`:''}
         ${g.phone?`<a class="btn btn-sm btn-ghost" href="tel:${g.phone}" style="text-decoration:none">Nazovi</a>`:''}
@@ -2127,6 +2209,90 @@ async function loadPushDevices(){
       ? r.devices.map(d=>`<span class="pill">${d.label}</span>`).join(' ')
       : '<span style="color:var(--mut);font-size:12px">Nema uređaja s uključenim obavijestima</span>';
   }catch(e){}
+}
+
+async function savePlatformTerms(){
+  const m=document.getElementById('pt_msg');
+  if(m){ m.style.color='var(--mut)'; m.textContent='Spremam…'; }
+  try{
+    const r=await api('/api/platform/terms',{method:'PUT',body:JSON.stringify({
+      lang:'hr', title:val('pt_title'),
+      body:document.getElementById('pt_body').value})});
+    if(m){ m.style.color='var(--good)'; m.textContent='Spremljeno ✓ (verzija '+r.version+')'; }
+  }catch(e){ if(m){ m.style.color='var(--bad)'; m.textContent=e.message||'Greška'; } }
+}
+
+// If the platform terms changed, ask the operator to accept before they carry on.
+async function checkPlatformTerms(){
+  try{
+    const t=await api('/api/platform/terms?lang=hr');
+    if(!t.needs_acceptance) return;
+    openModal(`
+      <h3 style="margin-top:0">${t.title||'Uvjeti korištenja'}</h3>
+      <p style="color:var(--mut);font-size:13px;margin-top:0">
+        ${t.accepted?'Uvjeti su ažurirani. Molimo prihvati novu verziju.':'Za korištenje sustava prihvati uvjete.'}
+        (verzija ${t.version})</p>
+      <div style="white-space:pre-wrap;font-size:13px;line-height:1.55;max-height:46vh;
+        overflow:auto;border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--bg)">${(t.body||'').replace(/</g,'&lt;')}</div>
+      <label style="display:flex;gap:9px;align-items:flex-start;margin-top:14px;font-size:14px;cursor:pointer">
+        <input type="checkbox" id="pt_ok" style="width:auto;margin-top:3px"> Pročitao sam i prihvaćam uvjete</label>
+      <div id="pt_amsg" style="font-size:13px;margin-top:8px"></div>
+      <div style="margin-top:14px"><button class="btn" onclick="acceptPlatformTerms()">Prihvaćam</button></div>`);
+  }catch(e){}
+}
+
+async function acceptPlatformTerms(){
+  const m=document.getElementById('pt_amsg');
+  if(!document.getElementById('pt_ok').checked){
+    if(m){ m.style.color='var(--bad)'; m.textContent='Označi da prihvaćaš uvjete.'; } return;
+  }
+  try{
+    await api('/api/platform/accept',{method:'POST',body:JSON.stringify({lang:'hr'})});
+    closeModal();
+  }catch(e){ if(m){ m.style.color='var(--bad)'; m.textContent=e.message||'Greška'; } }
+}
+
+async function saveWaiver(){
+  const m=document.getElementById('wv_msg');
+  const s=window.__wvSel||{type:'jetski',lang:'en'};
+  if(m){ m.style.color='var(--mut)'; m.textContent='Spremam…'; }
+  try{
+    const r=await api('/api/waivers/templates',{method:'PUT',body:JSON.stringify({
+      asset_type:s.type, lang:s.lang,
+      title:val('wv_title'),
+      body:document.getElementById('wv_body').value,
+      require_document:document.getElementById('wv_doc').checked})});
+    if(m){ m.style.color='var(--good)';
+      m.textContent='Spremljeno ✓ (verzija '+r.template.version+')'; }
+  }catch(e){ if(m){ m.style.color='var(--bad)'; m.textContent=e.message||'Greška'; } }
+}
+
+async function openWaiver(bookingId){
+  try{
+    const d=await api('/api/waivers/booking/'+bookingId);
+    const body = d.signed ? `
+      <div style="background:#e8f5ee;border:1px solid var(--good);border-radius:10px;padding:12px 14px">
+        <b>Potpisano ✓</b><br>
+        <span style="font-size:13px">${d.signature.signer_name}
+        ${d.signature.signer_document?' · '+d.signature.signer_document:''}<br>
+        ${fmt(d.signature.signed_at)} · verzija ${d.signature.version}</span>
+      </div>
+      ${d.signature.signature_png?`<img src="${d.signature.signature_png}"
+        style="max-width:100%;border:1px solid var(--line);border-radius:8px;margin-top:10px;background:#fff">`:''}
+      <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;color:var(--teal)">Prikaži potpisani tekst</summary>
+        <div style="white-space:pre-wrap;font-size:12.5px;background:var(--sand);
+          border-radius:8px;padding:10px;margin-top:8px;max-height:240px;overflow:auto">${(d.signature.body||'').replace(/</g,'&lt;')}</div>
+      </details>`
+      : `<p style="color:var(--mut);font-size:13px;margin-top:0">Gost još nije potpisao. Pošalji mu link ili neka skenira kod na licu mjesta.</p>
+      <div style="display:flex;gap:6px;margin-bottom:10px">
+        <input readonly id="wv_url" value="${d.url}" style="flex:1;font-size:12px;background:var(--bg)">
+        <button class="btn btn-sm" onclick="copyVal('wv_url')">Kopiraj</button>
+      </div>
+      <a class="btn btn-sm" href="${d.url}" target="_blank" style="text-decoration:none">Otvori za potpis</a>`;
+    openModal(`<h3 style="margin-top:0">Uvjeti — rezervacija #${bookingId}</h3>
+      ${body}
+      <div style="margin-top:16px"><button class="btn btn-ghost" onclick="openDetail(${bookingId})">Natrag</button></div>`);
+  }catch(e){ alert(e.message||'Greška'); }
 }
 
 async function saveAllSettings(){
