@@ -105,6 +105,91 @@ def create_booking(payload: BookingCreate, db: Session = Depends(get_db),
     return b
 
 
+def _quick_transfer(payload, start, qty, passengers, name, phone, email, db, user):
+    """Book a transfer: priced by zone and vehicle, one booking per vehicle."""
+    from datetime import timedelta
+    from app.models.transfer import TransferZone
+    from app.models.asset import Asset
+    from app.models.customer import Customer
+    from app.services import audit
+
+    zone = db.get(TransferZone, int(payload.get("zone_id") or 0))
+    if not zone:
+        raise HTTPException(400, "Odaberi zonu transfera.")
+    vehicle = (payload.get("vehicle") or "car").lower()
+    unit_price = (zone.van_price if vehicle == "van" else zone.car_price) or 0
+    if unit_price <= 0:
+        raise HTTPException(400, "Zona nema cijenu za odabrano vozilo.")
+    round_trip = bool(payload.get("round_trip"))
+    per_vehicle = unit_price * (2 if round_trip else 1)
+    total_all = per_vehicle * qty
+    end = start + timedelta(minutes=60)
+
+    # transfers don't consume a boat/jet — they need their own vehicle record
+    unit = (db.query(Asset)
+            .filter(Asset.asset_type == "transfer", Asset.active == True)  # noqa: E712
+            .first())
+    if not unit:
+        unit = Asset(name="Transfer vozilo", asset_type="transfer",
+                     capacity=8, active=True)
+        db.add(unit)
+        db.commit()
+        db.refresh(unit)
+
+    cust = None
+    if email:
+        cust = db.query(Customer).filter(Customer.email == email).first()
+    if not cust and phone:
+        cust = db.query(Customer).filter(Customer.phone == phone).first()
+    if not cust:
+        cust = Customer(full_name=name or phone, email=email or "", phone=phone or "")
+        db.add(cust); db.commit(); db.refresh(cust)
+    else:
+        if name:
+            cust.full_name = name
+        if phone:
+            cust.phone = phone
+        db.commit()
+
+    try:
+        prepaid = float(payload.get("paid") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Neispravan iznos uplate.")
+    if prepaid > total_all + 0.01:
+        raise HTTPException(400, "Uplaćeno je veće od ukupne cijene.")
+    per_unit_paid = round(prepaid / qty, 2) if qty else prepaid
+    pay_method = (payload.get("pay_method") or "cash").lower()
+    label = (f"Transfer {zone.name} — {'kombi' if vehicle == 'van' else 'auto'}"
+             f"{' (povratno)' if round_trip else ''}")
+
+    created = []
+    for _i in range(qty):
+        b = Booking(asset_id=(unit.id if unit else None), customer_id=cust.id,
+                    start_datetime=start, end_datetime=end,
+                    total_price=per_vehicle, deposit_amount=0,
+                    payment_status="unpaid", status="confirmed",
+                    passengers=max(1, passengers // qty),
+                    package_name=label, source="admin",
+                    pickup_location=(payload.get("pickup") or "")[:255])
+        if per_unit_paid > 0:
+            if pay_method == "cash":
+                b.cash_collected = per_unit_paid
+            else:
+                b.amount_paid = per_unit_paid
+            b.payment_status = ("paid" if per_unit_paid + 0.01 >= per_vehicle
+                                else "deposit_paid")
+        db.add(b); db.commit()
+        created.append(b.id)
+    audit.record(db, "quick_booking", actor=_actor(user), entity="booking",
+                 entity_id=",".join(str(i) for i in created),
+                 detail=f"{qty}× {label} · {cust.full_name or cust.phone} "
+                        f"· {start:%Y-%m-%d %H:%M} · {total_all:.2f} EUR")
+    return {"ok": True, "booking_ids": created, "count": len(created),
+            "total": round(total_all, 2), "paid": round(prepaid, 2),
+            "balance": round(max(total_all - prepaid, 0), 2),
+            "tour": label, "customer_id": cust.id}
+
+
 @router.post("/quick")
 def quick_booking(payload: dict, db: Session = Depends(get_db),
                   _=Depends(get_current_user)):
@@ -131,6 +216,11 @@ def quick_booking(payload: dict, db: Session = Depends(get_db),
         start = _parse(str(payload["start"]))
     except Exception:
         raise HTTPException(400, "Neispravan datum/vrijeme.")
+
+    # ---- transfers are priced per zone + vehicle, not from the tour catalog ----
+    if (payload.get("kind") or "").lower() == "transfer":
+        return _quick_transfer(payload, start, qty, passengers, name, phone,
+                               email, db, _)
 
     tour = db.get(TourType, int(tour_id)) if tour_id else None
     if not tour:

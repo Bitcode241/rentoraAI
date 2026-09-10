@@ -3057,3 +3057,127 @@ def test_settings_are_per_tenant():
     with as_tenant(1):
         assert settings_service.get(db, "brand_jetski") == "Jetski Dubrovnik"
     db.close()
+
+
+def test_roles_enforced_on_server(client):
+    """A skipper must be refused by the API, not merely have buttons hidden."""
+    from app.core.database import SessionLocal
+    from app.core.tenancy import all_tenants
+    from app.models.user import User
+    from app.core.security import hash_password
+    db = SessionLocal()
+    with all_tenants():
+        for name, role in (("t_owner", "owner"), ("t_skipper", "skipper")):
+            if not db.query(User).filter(User.username == name).first():
+                db.add(User(username=name, hashed_password=hash_password("lozinka123"),
+                            role=role, active=True, tenant_id=1))
+        db.commit()
+    db.close()
+
+    def hdr(u):
+        r = client.post("/api/auth/login",
+                        data={"username": u, "password": "lozinka123"})
+        assert r.status_code == 200, r.text
+        return {"Authorization": "Bearer " + r.json()["access_token"]}
+
+    own, ski = hdr("t_owner"), hdr("t_skipper")
+    # owner can see the money
+    assert client.get("/api/dashboard/money", headers=own).status_code == 200
+    assert client.get("/api/settings/business", headers=own).status_code == 200
+    # skipper is refused — server side
+    assert client.get("/api/dashboard/money", headers=ski).status_code == 403
+    assert client.get("/api/dashboard/partners", headers=ski).status_code == 403
+    assert client.get("/api/settings/business", headers=ski).status_code == 403
+    # but still gets the schedule, with the money stripped out
+    d = client.get("/api/dashboard/day", headers=ski)
+    assert d.status_code == 200
+    body = d.json()
+    assert body.get("hide_money") is True
+    assert "to_collect" not in body
+    for item in body.get("items", []):
+        assert "balance" not in item and "total" not in item
+    # /me tells the UI what to show
+    me = client.get("/api/staff/me", headers=ski).json()
+    assert me["role"] == "skipper"
+    assert "money" not in me["permissions"]
+    assert "schedule" in me["permissions"]
+
+
+def test_staff_creation_rules(client):
+    """Weak passwords and duplicate usernames are refused."""
+    from app.core.database import SessionLocal
+    from app.core.tenancy import all_tenants
+    from app.models.user import User
+    from app.core.security import hash_password
+    db = SessionLocal()
+    with all_tenants():
+        if not db.query(User).filter(User.username == "t_owner2").first():
+            db.add(User(username="t_owner2", hashed_password=hash_password("lozinka123"),
+                        role="owner", active=True, tenant_id=1))
+            db.commit()
+    db.close()
+    r = client.post("/api/auth/login",
+                    data={"username": "t_owner2", "password": "lozinka123"})
+    own = {"Authorization": "Bearer " + r.json()["access_token"]}
+    # too short a password
+    assert client.post("/api/staff", headers=own,
+                       json={"username": "novi", "password": "kratka",
+                             "role": "skipper"}).status_code == 400
+    # valid
+    ok = client.post("/api/staff", headers=own,
+                     json={"username": "novi_skiper", "password": "lozinka123",
+                           "role": "skipper"})
+    assert ok.status_code == 200
+    assert ok.json()["user"]["role"] == "skipper"
+    # duplicate username
+    assert client.post("/api/staff", headers=own,
+                       json={"username": "novi_skiper", "password": "lozinka123",
+                             "role": "skipper"}).status_code == 400
+
+
+def test_quick_booking_covers_all_types(client, auth):
+    """Quick booking must handle jet skis, boats AND transfers — not just jets."""
+    from app.core.database import SessionLocal
+    from app.models.tour_type import TourType
+    from app.models.transfer import TransferZone
+    from app.core.timeutil import to_local
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    jet = db.query(TourType).filter(TourType.asset_type == "jetski").first()
+    boat = db.query(TourType).filter(TourType.asset_type == "boat").first()
+    zone = db.query(TransferZone).first()
+    jid, bid_t, zid = jet.id, boat.id, zone.id
+    van, car = zone.van_price, zone.car_price
+    day = (to_local(datetime.now(timezone.utc)) + timedelta(days=16)).date()
+    db.close()
+    # jet ski
+    r1 = client.post("/api/bookings/quick", headers=auth,
+                     json={"tour_id": jid, "qty": 1, "passengers": 2,
+                           "name": "Jet", "phone": "+385911000001",
+                           "start": f"{day}T09:00:00"})
+    assert r1.status_code == 200
+    # boat
+    r2 = client.post("/api/bookings/quick", headers=auth,
+                     json={"tour_id": bid_t, "qty": 1, "passengers": 6,
+                           "name": "Boat", "phone": "+385911000002",
+                           "start": f"{day}T12:00:00"})
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["total"] > 0
+    # transfer, van, round trip -> price doubles
+    r3 = client.post("/api/bookings/quick", headers=auth,
+                     json={"kind": "transfer", "zone_id": zid, "vehicle": "van",
+                           "round_trip": True, "qty": 1, "passengers": 6,
+                           "name": "Transfer", "phone": "+385911000003",
+                           "start": f"{day}T15:00:00", "pickup": "Hotel Rixos"})
+    assert r3.status_code == 200, r3.text
+    assert r3.json()["total"] == van * 2
+    assert "Transfer" in r3.json()["tour"]
+    # transfer, car, one way
+    r4 = client.post("/api/bookings/quick", headers=auth,
+                     json={"kind": "transfer", "zone_id": zid, "vehicle": "car",
+                           "qty": 1, "passengers": 3, "name": "Car",
+                           "phone": "+385911000004", "start": f"{day}T18:00:00"})
+    assert r4.json()["total"] == car
+    # transfers appear in the day view like anything else
+    d = client.get(f"/api/dashboard/day?date={day}", headers=auth).json()
+    assert any("Transfer" in (i.get("tour") or "") for i in d["items"])

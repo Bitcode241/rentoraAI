@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.core.database import get_db
 from app.core.security import get_current_user
+from app.core.roles import require_money, require_settings, can, strip_money
 
 router = APIRouter(tags=["dashboard"])
 
@@ -42,7 +43,7 @@ def dashboard_selfcheck(db: Session = Depends(get_db), _=Depends(get_current_use
 
 @router.get("/api/dashboard/partners")
 def dashboard_partners(days: int = 90, db: Session = Depends(get_db),
-                       _=Depends(get_current_user)):
+                       _=Depends(require_money)):
     """What each partner earned and how much of it you still owe them."""
     from app.services import partner_settlement
     return partner_settlement.settlement_report(db, days)
@@ -50,7 +51,7 @@ def dashboard_partners(days: int = 90, db: Session = Depends(get_db),
 
 @router.post("/api/dashboard/partners/settle")
 def settle_partner(payload: dict, db: Session = Depends(get_db),
-                   _=Depends(get_current_user)):
+                   _=Depends(require_money)):
     """Mark bookings as paid out to the partner."""
     from app.services import partner_settlement, audit
     ids = payload.get("booking_ids") or []
@@ -244,18 +245,23 @@ def dashboard_day(date: str = "", db: Session = Depends(get_db),
         g["balance"] = round(g["balance"], 2)
         items.append(g)
     items.sort(key=lambda x: x["time"])
-    return {
+    out = {
         "date": day.isoformat(),
         "count": len(items),
         "guests": guests_total,
         "to_collect": round(to_collect, 2),
         "items": items,
     }
+    # a skipper gets the schedule and contacts, never the money
+    if not can(_, "money"):
+        out = strip_money(out)
+        out["hide_money"] = True
+    return out
 
 
 @router.get("/api/dashboard/money")
 def dashboard_money(days: int = 30, db: Session = Depends(get_db),
-                    _=Depends(get_current_user)):
+                    _=Depends(require_money)):
     """Revenue split (online vs cash) with VAT and card fees."""
     from app.services import money_service
     return money_service.money_overview(db, days)

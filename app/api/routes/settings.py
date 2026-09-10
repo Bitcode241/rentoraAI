@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.core.security import get_current_user, require_admin
+from app.core.security import get_current_user
+from app.core.roles import require_settings
 from app.services import settings_service
 from app.services import meeting_service
 
@@ -9,11 +10,11 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
 @router.get("/lead-times")
-def get_lead_times(db: Session = Depends(get_db), _=Depends(get_current_user)):
+def get_lead_times(db: Session = Depends(get_db), _=Depends(require_settings)):
     return settings_service.get_lead_times(db)
 
 
-@router.put("/lead-times", dependencies=[Depends(require_admin)])
+@router.put("/lead-times", dependencies=[Depends(require_settings)])
 def update_lead_times(payload: dict, db: Session = Depends(get_db)):
     """Body: {"jetski": 2, "boat": 8, "transfer": 3}. Values are hours."""
     clean = {}
@@ -26,7 +27,7 @@ def update_lead_times(payload: dict, db: Session = Depends(get_db)):
     return settings_service.set_lead_times(db, clean)
 
 
-@router.post("/send-reminders", dependencies=[Depends(require_admin)])
+@router.post("/send-reminders", dependencies=[Depends(require_settings)])
 def trigger_reminders(db: Session = Depends(get_db)):
     """Manually run the day-before reminder job now (for testing)."""
     from app.services.reminder_service import send_reminders
@@ -34,7 +35,7 @@ def trigger_reminders(db: Session = Depends(get_db)):
 
 
 @router.get("/business")
-def get_business(db: Session = Depends(get_db), _=Depends(get_current_user)):
+def get_business(db: Session = Depends(get_db), _=Depends(require_settings)):
     from app.services import settings_service
     return {
         "business_name": settings_service.business_name(db),
@@ -64,7 +65,7 @@ def get_business(db: Session = Depends(get_db), _=Depends(get_current_user)):
     }
 
 
-@router.put("/business", dependencies=[Depends(require_admin)])
+@router.put("/business", dependencies=[Depends(require_settings)])
 def update_business(payload: dict, db: Session = Depends(get_db)):
     from app.services import settings_service
     if "business_name" in payload:

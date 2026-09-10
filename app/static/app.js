@@ -8,9 +8,22 @@ const NAV_GROUPS = [
   {label:'Novac', items:['Novac','Partneri','Izvori']},
   {label:'Ponuda', items:['Ture','Flota','Transferi','Dodaci','Widget']},
   {label:'Gosti', items:['Gosti','Poruke']},
-  {label:'Sustav', items:['Postavke','Uvjeti','Uvjeti platforme','Provjera','Email računi','Log']},
+  {label:'Sustav', items:['Postavke','Osoblje','Uvjeti','Uvjeti platforme','Provjera','Email računi','Log']},
 ];
 const PAGES = NAV_GROUPS.flatMap(g=>g.items);
+// which permission each page needs — the server enforces this too
+const PAGE_PERM = {
+  'Novac':'money','Partneri':'money','Izvori':'money',
+  'Postavke':'settings','Uvjeti':'settings','Email računi':'settings',
+  'Uvjeti platforme':'platform','Provjera':'settings','Log':'settings',
+  'Ture':'settings','Flota':'settings','Transferi':'settings','Dodaci':'settings',
+  'Widget':'settings','Osoblje':'staff',
+};
+let ME = {permissions:['money','bookings','schedule','settings','platform','staff']};
+function allowed(page){
+  const need=PAGE_PERM[page];
+  return !need || (ME.permissions||[]).includes(need);
+}
 const SUBS = {
   'Danas':'Tko dolazi, kada, koliko naplatiti',
   'Slobodno':'Koliko je jedinica slobodno po satu',
@@ -28,6 +41,7 @@ const SUBS = {
   'Gosti':'Profili gostiju i povijest',
   'Poruke':'Mailovi gostiju i odgovori',
   'Postavke':'Brendovi, lokacije, pravila, naplata',
+  'Osoblje':'Tko ima pristup i što smije vidjeti',
   'Uvjeti':'Što gost potpisuje prije izlaska',
   'Uvjeti platforme':'Što vlasnik rentala prihvaća za korištenje',
   'Provjera':'Traži probleme prije nego ih gost nađe',
@@ -61,19 +75,22 @@ function logout(){ TOKEN=''; localStorage.removeItem('tok');
   document.getElementById('shell').style.display='none';
   document.getElementById('login').style.display='flex'; }
 
-function boot(){
+async function boot(){
   document.getElementById('login').style.display='none';
   document.getElementById('shell').style.display='grid';
+  try{ ME = await api('/api/staff/me'); }catch(e){}
   const nav = document.getElementById('nav');
   nav.innerHTML = NAV_GROUPS.map((g,gi)=>{
-    if(!g.label) return g.items.map(navLink).join('');
+    const items=g.items.filter(allowed);
+    if(!items.length) return '';
+    if(!g.label) return items.map(navLink).join('');
     const open = navGroupOpen(g.label);
     return `<button class="nav-sec" data-g="${g.label}" onclick="toggleGroup('${g.label}')">
         <span>${g.label}</span><span class="caret">${open?'▾':'▸'}</span></button>
-      <div class="nav-grp" data-g="${g.label}" ${open?'':'hidden'}>${g.items.map(navLink).join('')}</div>`;
+      <div class="nav-grp" data-g="${g.label}" ${open?'':'hidden'}>${items.map(navLink).join('')}</div>`;
   }).join('');
   nav.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>go(a.dataset.p)));
-  go('Danas');
+  go(allowed('Danas')?'Danas':(PAGES.find(allowed)||'Danas'));
   refreshBadges();
   setInterval(refreshBadges, 120000);
   checkPlatformTerms();   // refresh every 2 min
@@ -360,6 +377,28 @@ const RENDER = {
           </footer>
         </article>`).join('')}</div>`}`;
     window.__assets = assets||[];
+  },
+  'Osoblje': async (v)=>{
+    const d=await api('/api/staff');
+    v.innerHTML=`
+      <p style="color:var(--mut);font-size:13px;margin-top:0">Tko ima pristup sustavu i što smije vidjeti.
+      Skiper vidi raspored i kontakte gostiju, ali <b>ne vidi novac ni postavke</b> — i server ga odbija ako pokuša.</p>
+      <div class="toolbar" style="margin-bottom:14px">
+        <button class="btn btn-sm" onclick="staffModal()">+ Dodaj člana</button>
+      </div>
+      <div class="bk-list">${d.staff.map(u=>`
+        <article class="bk" style="cursor:default">
+          <header class="bk-top">
+            <div class="bk-who">
+              <div class="bk-name">${u.username} ${u.active?'':'<span style="color:var(--bad);font-size:12px">(neaktivan)</span>'}</div>
+              <div class="bk-sub">${u.role_label}${u.email?' · '+u.email:''}</div>
+            </div>
+            <div class="bk-acts">
+              <button class="ic" title="Uredi" onclick="staffModal(${u.id},'${u.username}','${u.role}',${u.active})">✎</button>
+            </div>
+          </header>
+        </article>`).join('')}</div>`;
+    window.__roles=d.roles;
   },
   'Uvjeti platforme': async (v)=>{
     const [t, acc] = await Promise.all([
@@ -1896,24 +1935,48 @@ async function settlePartner(ids, settled){
 }
 
 async function quickBookModal(){
-  let tours=[];
-  try{ tours=await api('/api/tours?asset_type=jetski'); }catch(e){}
+  // load everything bookable: jet ski + boat tours, and transfer zones
+  let jet=[], boat=[], zones=[];
+  try{ [jet, boat, zones] = await Promise.all([
+    api('/api/tours?asset_type=jetski').catch(()=>[]),
+    api('/api/tours?asset_type=boat').catch(()=>[]),
+    api('/api/transfers/zones').catch(()=>[])
+  ]); }catch(e){}
   const now=new Date(); now.setMinutes(0,0,0); now.setHours(now.getHours()+1);
   const p=n=>String(n).padStart(2,'0');
   const def=`${now.getFullYear()}-${p(now.getMonth()+1)}-${p(now.getDate())}T${p(now.getHours())}:00`;
+  window.__qbData={jet,boat,zones};
+  const opt=(t,kind)=>`<option value="${kind}:${t.id}" data-kind="${kind}"
+      data-price="${t.price||0}" data-min="${t.duration_minutes||60}">${t.name} · ${t.duration_minutes} min · ${t.price} €</option>`;
+  const zopt=z=>`<option value="transfer:${z.id}" data-kind="transfer"
+      data-car="${z.car_price||0}" data-van="${z.van_price||0}">${z.name} · auto ${z.car_price||0} € / kombi ${z.van_price||0} €</option>`;
   openModal(`
     <h3 style="margin-top:0">Brza rezervacija</h3>
     <p style="color:var(--mut);font-size:13px;margin-top:0">Za goste dogovorene na WhatsAppu ili na licu mjesta.</p>
-    <label>Tura</label>
-    <select id="qb_tour" onchange="qbCalc()">${tours.map(t=>
-      `<option value="${t.id}" data-price="${t.price}">${t.name} · ${t.duration_minutes} min · ${t.price} €</option>`).join('')}</select>
+    <label>Što rezerviraš</label>
+    <select id="qb_tour" onchange="qbCalc()">
+      ${jet.length?`<optgroup label="Jet ski">${jet.map(t=>opt(t,'jetski')).join('')}</optgroup>`:''}
+      ${boat.length?`<optgroup label="Gliseri / brodovi">${boat.map(t=>opt(t,'boat')).join('')}</optgroup>`:''}
+      ${zones.length?`<optgroup label="Transferi">${zones.map(zopt).join('')}</optgroup>`:''}
+    </select>
     <label>Kada</label>
     <input id="qb_start" type="datetime-local" value="${def}">
     <div style="display:flex;gap:10px">
-      <div style="flex:1"><label>Koliko jetova</label>
+      <div style="flex:1"><label id="qb_qty_lbl">Koliko jedinica</label>
         <input id="qb_qty" type="number" min="1" max="6" value="1" oninput="qbCalc()"></div>
       <div style="flex:1"><label>Ukupno osoba</label>
-        <input id="qb_pax" type="number" min="1" value="1"></div>
+        <input id="qb_pax" type="number" min="1" value="1" oninput="qbCalc()"></div>
+    </div>
+    <div id="qb_transfer_wrap" style="display:none">
+      <label>Vozilo</label>
+      <select id="qb_vehicle" onchange="qbCalc()">
+        <option value="car">Auto (do 3 osobe)</option>
+        <option value="van">Kombi (4–8 osoba)</option>
+      </select>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:10px">
+        <input type="checkbox" id="qb_return" style="width:auto" onchange="qbCalc()"> Povratno (×2)</label>
+      <label>Adresa preuzimanja</label>
+      <input id="qb_pickup" placeholder="npr. Hotel Rixos, recepcija">
     </div>
     <label>Ime gosta</label>
     <input id="qb_name" placeholder="Ime i prezime">
@@ -1941,15 +2004,34 @@ async function quickBookModal(){
   qbCalc();
 }
 
+function qbKind(){
+  const sel=document.getElementById('qb_tour');
+  const o=sel&&sel.options[sel.selectedIndex];
+  return o?(o.getAttribute('data-kind')||'jetski'):'jetski';
+}
+
 function qbCalc(){
   const sel=document.getElementById('qb_tour');
   const box=document.getElementById('qb_calc');
   if(!sel||!box) return;
   const o=sel.options[sel.selectedIndex];
-  const price=o?parseFloat(o.getAttribute('data-price')||0):0;
+  const kind=qbKind();
+  const isTransfer = kind==='transfer';
+  const tw=document.getElementById('qb_transfer_wrap');
+  if(tw) tw.style.display=isTransfer?'block':'none';
+  const ql=document.getElementById('qb_qty_lbl');
+  if(ql) ql.textContent = isTransfer?'Broj vozila':(kind==='boat'?'Koliko plovila':'Koliko jetova');
+  let total=0;
   const qty=+val('qb_qty')||1;
+  if(isTransfer){
+    const veh=val('qb_vehicle')||'car';
+    const unit=+(o.getAttribute(veh==='van'?'data-van':'data-car')||0);
+    const ret=document.getElementById('qb_return');
+    total = unit*qty*((ret&&ret.checked)?2:1);
+  }else{
+    total = (+(o?o.getAttribute('data-price'):0)||0)*qty;
+  }
   const paid=parseFloat(val('qb_paid')||0)||0;
-  const total=price*qty;
   const rest=Math.max(total-paid,0);
   box.innerHTML=`
     <div style="display:flex;justify-content:space-between"><span style="color:var(--mut)">Ukupno</span><b>${money(total)}</b></div>
@@ -1961,8 +2043,10 @@ function qbCalc(){
 
 async function saveQuickBooking(){
   const msg=document.getElementById('qb_msg');
+  const sel=document.getElementById('qb_tour');
+  const raw=val('qb_tour')||'';
+  const [kind, rid] = raw.split(':');
   const body={
-    tour_id:+val('qb_tour'),
     start:val('qb_start')+':00',
     qty:+val('qb_qty')||1,
     passengers:+val('qb_pax')||1,
@@ -1972,6 +2056,15 @@ async function saveQuickBooking(){
     paid:parseFloat(val('qb_paid')||0)||0,
     pay_method:val('qb_method')||'cash',
   };
+  if(kind==='transfer'){
+    body.kind='transfer';
+    body.zone_id=+rid;
+    body.vehicle=val('qb_vehicle')||'car';
+    body.round_trip=document.getElementById('qb_return').checked;
+    body.pickup=val('qb_pickup');
+  }else{
+    body.tour_id=+rid;
+  }
   if(!body.name && !body.phone){
     if(msg){ msg.style.color='var(--bad)'; msg.textContent='Upiši barem ime ili broj.'; } return;
   }
@@ -2209,6 +2302,45 @@ async function loadPushDevices(){
       ? r.devices.map(d=>`<span class="pill">${d.label}</span>`).join(' ')
       : '<span style="color:var(--mut);font-size:12px">Nema uređaja s uključenim obavijestima</span>';
   }catch(e){}
+}
+
+function staffModal(id, username, role, active){
+  const roles=window.__roles||{owner:'Vlasnik',manager:'Voditelj',skipper:'Skiper'};
+  const edit=!!id;
+  openModal(`
+    <h3 style="margin-top:0">${edit?'Uredi: '+username:'Novi član tima'}</h3>
+    ${edit?'':`<label>Korisničko ime</label><input id="st_user" placeholder="npr. ivan">`}
+    ${edit?'':`<label>Email (nije obavezno)</label><input id="st_mail">`}
+    <label>Uloga</label>
+    <select id="st_role">${Object.entries(roles).map(([k,l])=>
+      `<option value="${k}" ${role===k?'selected':''}>${l}</option>`).join('')}</select>
+    <label>${edit?'Nova lozinka (ostavi prazno da ne mijenjaš)':'Lozinka (min. 8 znakova)'}</label>
+    <input id="st_pass" type="password" autocomplete="new-password">
+    ${edit?`<label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:12px">
+      <input type="checkbox" id="st_active" style="width:auto" ${active?'checked':''}> Aktivan</label>`:''}
+    <div id="st_msg" style="font-size:13px;margin-top:8px"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn" onclick="saveStaff(${id||0})">Spremi</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Odustani</button>
+    </div>`);
+}
+
+async function saveStaff(id){
+  const m=document.getElementById('st_msg');
+  const say=t=>{ if(m){ m.style.color='var(--bad)'; m.textContent=t; } };
+  try{
+    if(id){
+      const body={role:val('st_role'),
+        active:document.getElementById('st_active').checked};
+      const p=val('st_pass'); if(p) body.password=p;
+      await api('/api/staff/'+id,{method:'PUT',body:JSON.stringify(body)});
+    }else{
+      await api('/api/staff',{method:'POST',body:JSON.stringify({
+        username:val('st_user'), email:val('st_mail'),
+        role:val('st_role'), password:val('st_pass')})});
+    }
+    closeModal(); go('Osoblje');
+  }catch(e){ say(e.message||'Greška'); }
 }
 
 async function savePlatformTerms(){
