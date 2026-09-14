@@ -1,5 +1,12 @@
-"""Local-time formatting. Bookings are stored in UTC; guests/partners think in
-local Dubrovnik time (Europe/Zagreb). Always format for humans in local time.
+"""Local-time handling.
+
+Bookings are stored in UTC; people think in local Dubrovnik time (Europe/Zagreb).
+Two directions matter:
+
+  to_local / fmt_local   – UTC out of the database  →  what a human should read
+  parse_local_input      – what a human typed       →  UTC for storage
+
+Getting the second one wrong is what makes a reminder say 20:00 for an 18:00 tour.
 """
 from datetime import datetime, timezone
 
@@ -39,3 +46,23 @@ def local_to_utc(dt: datetime) -> datetime:
     if _LOCAL is not None:
         return dt.replace(tzinfo=_LOCAL).astimezone(timezone.utc)
     return dt.replace(tzinfo=timezone.utc)
+
+
+def parse_local_input(text: str) -> datetime:
+    """Parse a date/time the operator typed, treating it as local wall-clock time
+    and returning UTC for storage.
+
+    `_parse` in the AI tools marks naive values as UTC, which is right for machine
+    input but wrong for a human typing "18:00" — they mean 18:00 here.
+    """
+    from dateutil import parser as dtparser
+    s = (text or "").strip()
+    if not s:
+        raise ValueError("empty datetime")
+    try:
+        out = datetime.fromisoformat(s)
+    except ValueError:
+        out = dtparser.parse(s, dayfirst=True, fuzzy=True)
+    if out.tzinfo is not None:
+        return out.astimezone(timezone.utc)
+    return local_to_utc(out)

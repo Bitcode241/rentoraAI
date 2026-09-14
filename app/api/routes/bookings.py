@@ -213,7 +213,10 @@ def quick_booking(payload: dict, db: Session = Depends(get_db),
     if not payload.get("start"):
         raise HTTPException(400, "Upiši datum i vrijeme.")
     try:
-        start = _parse(str(payload["start"]))
+        # the admin types local (Dubrovnik) wall-clock time — convert to UTC for
+        # storage, otherwise reminders and vouchers show the wrong hour
+        from app.core.timeutil import parse_local_input
+        start = parse_local_input(str(payload["start"]))
     except Exception:
         raise HTTPException(400, "Neispravan datum/vrijeme.")
 
@@ -351,7 +354,8 @@ def edit_booking(booking_id: int, payload: dict, db: Session = Depends(get_db),
     if "start" in payload and payload["start"]:
         from app.ai.tools import _parse
         try:
-            new_start = _parse(str(payload["start"]))
+            from app.core.timeutil import parse_local_input
+            new_start = parse_local_input(str(payload["start"]))
         except Exception:
             raise HTTPException(400, "Neispravan datum/vrijeme.")
         dur = None
@@ -385,6 +389,60 @@ def edit_booking(booking_id: int, payload: dict, db: Session = Depends(get_db),
     return {"ok": True, "id": b.id, "total_price": b.total_price,
             "payment_status": b.payment_status,
             "balance": round(max(total - settled, 0), 2)}
+
+
+@router.post("/{booking_id}/move")
+def move_booking(booking_id: int, payload: dict, db: Session = Depends(get_db),
+                 _=Depends(get_current_user)):
+    """Move a booking to another day/time, keeping its duration.
+
+    Checks the new slot is actually free (and not blocked) unless the caller
+    explicitly forces it — a double booking is worse than a refused move.
+    """
+    from app.core.timeutil import parse_local_input, fmt_local
+    from app.models.asset import Asset
+    from app.services import audit, block_service
+    b = db.get(Booking, booking_id)
+    if not b:
+        raise HTTPException(404, "Rezervacija nije pronađena.")
+    if not payload.get("start"):
+        raise HTTPException(400, "Upiši novi datum i vrijeme.")
+    try:
+        new_start = parse_local_input(str(payload["start"]))
+    except Exception:
+        raise HTTPException(400, "Neispravan datum/vrijeme.")
+    duration = (b.end_datetime - b.start_datetime) if b.end_datetime else None
+    new_end = new_start + duration if duration else new_start
+    force = bool(payload.get("force"))
+
+    asset = db.get(Asset, b.asset_id) if b.asset_id else None
+    if not force and asset:
+        clash = (db.query(Booking)
+                 .filter(Booking.asset_id == b.asset_id,
+                         Booking.id != b.id,
+                         Booking.start_datetime < new_end,
+                         Booking.end_datetime > new_start,
+                         Booking.status != "cancelled")
+                 .first())
+        if clash:
+            raise HTTPException(
+                409, f"Termin je zauzet (rezervacija #{clash.id}). "
+                     f"Odaberi drugo vrijeme ili premjesti tu rezervaciju.")
+        if block_service.is_blocked(db, b.asset_id, asset.asset_type,
+                                    new_start, new_end):
+            raise HTTPException(409, "Termin je blokiran (vrijeme/servis).")
+
+    old_when = fmt_local(b.start_datetime)
+    b.start_datetime = new_start
+    if duration:
+        b.end_datetime = new_end
+    b.reminder_sent = 0          # the guest should get a reminder for the new day
+    db.commit()
+    audit.record(db, "booking_moved", actor=_actor(_), entity="booking",
+                 entity_id=b.id,
+                 detail=f"{old_when} → {fmt_local(new_start)}")
+    return {"ok": True, "id": b.id, "start": b.start_datetime,
+            "end": b.end_datetime, "when": fmt_local(new_start)}
 
 
 @router.post("/{booking_id}/cash")

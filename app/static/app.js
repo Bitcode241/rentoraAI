@@ -8,14 +8,14 @@ const NAV_GROUPS = [
   {label:'Novac', items:['Novac','Partneri','Izvori']},
   {label:'Ponuda', items:['Ture','Flota','Transferi','Dodaci','Widget']},
   {label:'Gosti', items:['Gosti','Poruke']},
-  {label:'Sustav', items:['Postavke','Osoblje','Uvjeti','Uvjeti platforme','Provjera','Email računi','Log']},
+  {label:'Sustav', items:['Postavke','Osoblje','API ključevi','Uvjeti','Uvjeti platforme','Provjera','Email računi','Log']},
 ];
 const PAGES = NAV_GROUPS.flatMap(g=>g.items);
 // which permission each page needs — the server enforces this too
 const PAGE_PERM = {
   'Novac':'money','Partneri':'money','Izvori':'money',
   'Postavke':'settings','Uvjeti':'settings','Email računi':'settings',
-  'Uvjeti platforme':'platform','Provjera':'settings','Log':'settings',
+  'Uvjeti platforme':'platform','API ključevi':'platform','Provjera':'settings','Log':'settings',
   'Ture':'settings','Flota':'settings','Transferi':'settings','Dodaci':'settings',
   'Widget':'settings','Osoblje':'staff',
 };
@@ -42,6 +42,7 @@ const SUBS = {
   'Poruke':'Mailovi gostiju i odgovori',
   'Postavke':'Brendovi, lokacije, pravila, naplata',
   'Osoblje':'Tko ima pristup i što smije vidjeti',
+  'API ključevi':'Pristup za vanjske programe i AI agenta',
   'Uvjeti':'Što gost potpisuje prije izlaska',
   'Uvjeti platforme':'Što vlasnik rentala prihvaća za korištenje',
   'Provjera':'Traži probleme prije nego ih gost nađe',
@@ -399,6 +400,44 @@ const RENDER = {
           </header>
         </article>`).join('')}</div>`;
     window.__roles=d.roles;
+  },
+  'API ključevi': async (v)=>{
+    const d=await api('/api/keys');
+    const base=location.origin;
+    v.innerHTML=`
+      <p style="color:var(--mut);font-size:13px;margin-top:0">Ključevi kojima vanjski programi (npr. tvoj AI agent) pristupaju podacima ove firme.
+      Ključ se prikazuje <b>samo jednom</b> pri izdavanju — spremi ga odmah.</p>
+      <div class="toolbar" style="margin-bottom:14px">
+        <button class="btn btn-sm" onclick="newKeyModal()">+ Novi ključ</button>
+        <button class="btn btn-sm btn-ghost" onclick="apiDocs()">Kako se koristi</button>
+      </div>
+      ${!d.keys.length?'<div class="panel"><div class="empty">Nema izdanih ključeva.</div></div>':
+      `<div class="bk-list">${d.keys.map(k=>`
+        <article class="bk" style="cursor:default;${k.active?'':'opacity:.55'}">
+          <header class="bk-top">
+            <div class="bk-who">
+              <div class="bk-name">${k.name} ${k.active?'':'<span style="color:var(--bad);font-size:12px">— opozvan</span>'}</div>
+              <div class="bk-sub mono" style="font-family:'IBM Plex Mono',monospace">${k.prefix}••••••••</div>
+            </div>
+            <div class="bk-when">
+              <div class="bk-date">${k.calls||0}</div>
+              <div class="bk-time">poziva</div>
+            </div>
+          </header>
+          <footer class="bk-foot">
+            <div class="bk-tags">
+              ${k.scopes.map(s=>`<span class="pill">${s==='write'?'pisanje':'čitanje'}</span>`).join('')}
+              <span style="font-size:11px;color:var(--mut)">
+                ${k.last_used_at?('zadnji put '+fmt(k.last_used_at)):'nije korišten'}</span>
+            </div>
+            ${k.active?`<div class="bk-acts">
+              <button class="ic" title="Opozovi" onclick="revokeKey(${k.id},'${k.name.replace(/'/g,"")}')">✕</button>
+            </div>`:''}
+          </footer>
+        </article>`).join('')}</div>`}
+      <p style="font-size:12px;color:var(--mut);margin-top:14px">
+        Adresa API-ja: <code>${base}/api/v1/</code> · Ključ ide u zaglavlje <code>X-API-Key</code>.
+        Ako ključ procuri, odmah ga opozovi i izdaj novi.</p>`;
   },
   'Uvjeti platforme': async (v)=>{
     const [t, acc] = await Promise.all([
@@ -1012,6 +1051,7 @@ function bkMenu(id, pay, status, dep){
     act.push(`<button class="btn btn-sm btn-ghost" onclick="closeModal();sendConfirm(${id})">Pošalji potvrdu gostu</button>`);
     act.push(`<button class="btn btn-sm btn-ghost" onclick="closeModal();refundB(${id})">Povrat novca</button>`);
   }
+  act.push(`<button class="btn btn-sm btn-ghost" onclick="closeModal();moveBooking(${id})">Premjesti termin</button>`);
   act.push(`<button class="btn btn-sm btn-ghost" onclick="closeModal();openVoucher(${id})">Voucher</button>`);
   if(status!=='cancelled'&&status!=='completed')
     act.push(`<button class="btn btn-sm btn-ghost" style="color:var(--bad)" onclick="closeModal();cancelB(${id})">Otkaži rezervaciju</button>`);
@@ -1842,6 +1882,7 @@ async function openDetail(id){
 
       <div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap">
         ${m.balance>0?`<button class="btn btn-sm" onclick="recordCash(${d.id},${m.balance})">Naplaćeno u gotovini</button>`:''}
+        <button class="btn btn-sm btn-ghost" onclick="moveBooking(${d.id})">Premjesti termin</button>
         <button class="btn btn-sm btn-ghost" onclick="openWaiver(${d.id})">Uvjeti / potpis</button>
         <button class="btn btn-sm btn-ghost" onclick="editBooking(${d.id})">Uredi rezervaciju</button>
         ${wa?`<a class="btn btn-sm btn-ghost" href="https://wa.me/${wa}" target="_blank" style="text-decoration:none">WhatsApp gostu</a>`:''}
@@ -2146,6 +2187,55 @@ async function saveBookingEdit(id){
   }catch(e){ if(msg){ msg.style.color='var(--bad)'; msg.textContent=e.message||'Greška'; } }
 }
 
+async function moveBooking(id){
+  try{
+    const d=await api('/api/bookings/'+id+'/detail');
+    const w=d.what||{};
+    const cur=(()=>{ if(!w.start) return '';
+      const dt=new Date(w.start); const p=n=>String(n).padStart(2,'0');
+      return `${dt.getFullYear()}-${p(dt.getMonth()+1)}-${p(dt.getDate())}T${p(dt.getHours())}:${p(dt.getMinutes())}`;
+    })();
+    const mins = (w.start&&w.end)?Math.round((new Date(w.end)-new Date(w.start))/60000):0;
+    openModal(`
+      <h3 style="margin-top:0">Premjesti rezervaciju #${id}</h3>
+      <p style="color:var(--mut);font-size:13px;margin-top:0">
+        ${d.guest&&d.guest.name?d.guest.name+' · ':''}${w.package_name||''}
+        ${mins?' · '+mins+' min':''}<br>
+        Sada: <b>${fmt(w.start)}</b></p>
+      <label>Novi termin</label>
+      <input id="mv_start" type="datetime-local" value="${cur}">
+      <div style="font-size:12px;color:var(--mut);margin-top:6px">
+        Trajanje ostaje isto. Provjerit ćemo je li novi termin slobodan.</div>
+      <div id="mv_msg" style="font-size:13px;margin-top:8px"></div>
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button class="btn" onclick="saveMove(${id},false)">Premjesti</button>
+        <button class="btn btn-ghost" onclick="openDetail(${id})">Odustani</button>
+      </div>`);
+  }catch(e){ alert(e.message||'Greška'); }
+}
+
+async function saveMove(id, force){
+  const m=document.getElementById('mv_msg');
+  const st=val('mv_start');
+  if(!st){ if(m){ m.style.color='var(--bad)'; m.textContent='Odaberi termin.'; } return; }
+  if(m){ m.style.color='var(--mut)'; m.textContent='Premještam…'; }
+  try{
+    const r=await api('/api/bookings/'+id+'/move',{method:'POST',
+      body:JSON.stringify({start:st+':00', force:!!force})});
+    closeModal(); go('Danas');
+    setTimeout(()=>alert('Premješteno na '+r.when),200);
+  }catch(e){
+    const msg=e.message||'Greška';
+    if(m){
+      m.style.color='var(--bad)';
+      if(msg.indexOf('zauzet')>-1 || msg.indexOf('blokiran')>-1){
+        m.innerHTML=msg+'<br><button class="btn btn-sm btn-ghost" style="margin-top:8px" '+
+          'onclick="saveMove('+id+',true)">Ipak premjesti (preklapanje)</button>';
+      } else { m.textContent=msg; }
+    }
+  }
+}
+
 async function recordCash(id, suggested){
   let d=null;
   try{ d=await api('/api/bookings/'+id+'/detail'); }catch(e){ alert(e.message); return; }
@@ -2302,6 +2392,89 @@ async function loadPushDevices(){
       ? r.devices.map(d=>`<span class="pill">${d.label}</span>`).join(' ')
       : '<span style="color:var(--mut);font-size:12px">Nema uređaja s uključenim obavijestima</span>';
   }catch(e){}
+}
+
+function newKeyModal(){
+  openModal(`
+    <h3 style="margin-top:0">Novi API ključ</h3>
+    <label>Naziv (za tvoju evidenciju)</label>
+    <input id="ak_name" placeholder="npr. Jarvis — moj AI agent">
+    <label>Što ključ smije</label>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:6px">
+      <input type="checkbox" checked disabled style="width:auto"> Čitanje — kalendar, cijene, rezervacije</label>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:4px">
+      <input type="checkbox" id="ak_write" style="width:auto"> Pisanje — stvaranje i izmjena rezervacija</label>
+    <div style="background:#fff8e6;border:1px solid var(--warn);border-radius:8px;
+      padding:10px 12px;margin-top:14px;font-size:12.5px">
+      Ključ daje pristup podacima cijele firme. Daj ga samo programu kojem vjeruješ,
+      i uključi pisanje samo ako mu stvarno treba.</div>
+    <div id="ak_msg" style="font-size:13px;margin-top:8px"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn" onclick="createKey()">Izdaj ključ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Odustani</button>
+    </div>`);
+}
+
+async function createKey(){
+  const m=document.getElementById('ak_msg');
+  const name=val('ak_name');
+  if(name.trim().length<3){ if(m){m.style.color='var(--bad)';m.textContent='Upiši naziv (min. 3 znaka).';} return; }
+  const scopes=['read'];
+  if(document.getElementById('ak_write').checked) scopes.push('write');
+  if(m){ m.style.color='var(--mut)'; m.textContent='Izdajem…'; }
+  try{
+    const r=await api('/api/keys',{method:'POST',body:JSON.stringify({name, scopes})});
+    showNewKey(r);
+  }catch(e){ if(m){ m.style.color='var(--bad)'; m.textContent=e.message||'Greška'; } }
+}
+
+function showNewKey(r){
+  openModal(`
+    <h3 style="margin-top:0">Ključ izdan: ${r.name}</h3>
+    <div style="background:#fff8e6;border:1px solid var(--warn);border-radius:8px;
+      padding:10px 12px;margin-bottom:12px;font-size:13px">
+      <b>Spremi ga sada.</b> Ovo je jedini put da ga vidiš — u bazi je pohranjen samo
+      njegov otisak, pa ga ne možemo ponovno prikazati.</div>
+    <div style="display:flex;gap:6px">
+      <input readonly id="ak_val" value="${r.key}"
+        style="flex:1;font-family:'IBM Plex Mono',monospace;font-size:12px;background:var(--bg)">
+      <button class="btn btn-sm" onclick="copyVal('ak_val')">Kopiraj</button>
+    </div>
+    <div style="font-size:12px;color:var(--mut);margin-top:10px">
+      Ovlasti: ${r.scopes.join(', ')}</div>
+    <div style="margin-top:16px"><button class="btn" onclick="closeModal();go('API ključevi')">Gotovo</button></div>`);
+}
+
+async function revokeKey(id, name){
+  if(!confirm(`Opozvati ključ "${name}"?\n\nSvaki program koji ga koristi odmah gubi pristup.`)) return;
+  try{ await api('/api/keys/'+id,{method:'DELETE'}); go('API ključevi'); }
+  catch(e){ alert(e.message||'Greška'); }
+}
+
+function apiDocs(){
+  const b=location.origin;
+  openModal(`
+    <h3 style="margin-top:0">Kako se API koristi</h3>
+    <p style="font-size:13px;color:var(--mut);margin-top:0">Svaki zahtjev nosi zaglavlje
+      <code>X-API-Key</code>. Sve je ograničeno na tvoju firmu.</p>
+    <div style="font-size:12.5px;line-height:1.7">
+      <b>Čitanje</b><br>
+      <code>GET ${b}/api/v1/ping</code> — provjera ključa<br>
+      <code>GET ${b}/api/v1/tours</code> — ture, cijene, trajanja<br>
+      <code>GET ${b}/api/v1/transfers</code> — zone i cijene prijevoza<br>
+      <code>GET ${b}/api/v1/fleet</code> — plovila<br>
+      <code>GET ${b}/api/v1/availability?asset_type=jetski&days=7</code> — slobodno po satu<br>
+      <code>GET ${b}/api/v1/day?date=2026-09-20</code> — tko dolazi taj dan<br>
+      <code>GET ${b}/api/v1/bookings?days_ahead=30</code> — nadolazeće rezervacije<br><br>
+      <b>Pisanje</b> (treba ovlast "pisanje")<br>
+      <code>POST ${b}/api/v1/bookings</code><br>
+      <code>POST ${b}/api/v1/bookings/{id}/move</code><br>
+      <code>POST ${b}/api/v1/bookings/{id}/cash</code>
+    </div>
+    <div style="background:var(--sand);border-radius:8px;padding:10px 12px;margin-top:12px;
+      font-family:'IBM Plex Mono',monospace;font-size:11.5px;white-space:pre-wrap">curl -H "X-API-Key: rok_..." \\
+  ${b}/api/v1/availability?asset_type=jetski&days=3</div>
+    <div style="margin-top:16px"><button class="btn btn-ghost" onclick="closeModal()">Zatvori</button></div>`);
 }
 
 function staffModal(id, username, role, active){

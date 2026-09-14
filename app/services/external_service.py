@@ -83,7 +83,8 @@ def create_request(db: Session, asset: Asset, customer: Customer, *,
 
 
 def owner_email_body(req: ExternalRequest, asset: Asset) -> str:
-    when = req.start_datetime.strftime("%d.%m.%Y %H:%M")
+    from app.core.timeutil import fmt_local
+    when = fmt_local(req.start_datetime)
     split = commission_split(req.quoted_price, asset.commission_percent)
     return (
         f"Pozdrav{(' ' + asset.owner_name) if asset.owner_name else ''},\n\n"

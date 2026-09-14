@@ -3181,3 +3181,153 @@ def test_quick_booking_covers_all_types(client, auth):
     # transfers appear in the day view like anything else
     d = client.get(f"/api/dashboard/day?date={day}", headers=auth).json()
     assert any("Transfer" in (i.get("tour") or "") for i in d["items"])
+
+
+def test_typed_time_is_local_everywhere():
+    """Regression: typing 18:00 must read back as 18:00 in reminders and vouchers,
+    not 20:00 — the reminder email was formatting raw UTC."""
+    from app.core.timeutil import parse_local_input, fmt_local
+    stored = parse_local_input("2026-09-15T18:00:00")
+    assert stored.tzinfo is not None
+    assert stored.strftime("%H:%M") == "16:00"   # UTC in the database
+    assert fmt_local(stored) == "15.09.2026 18:00"  # what people see
+    # an explicit offset is respected rather than shifted again
+    tz_aware = parse_local_input("2026-09-15T18:00:00+02:00")
+    assert fmt_local(tz_aware) == "15.09.2026 18:00"
+    # the reminder builder must use local time
+    src = open("app/services/reminder_service.py", encoding="utf-8").read()
+    assert "start_datetime.strftime" not in src
+
+
+def test_move_booking(client, auth):
+    """A booking can be moved to another day, keeping its duration, and a clash
+    is refused unless explicitly forced."""
+    from app.core.database import SessionLocal
+    from app.models.tour_type import TourType
+    from app.models.booking import Booking
+    from app.core.timeutil import to_local
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    t = db.query(TourType).filter(TourType.asset_type == "jetski").first()
+    tid = t.id
+    d1 = (to_local(datetime.now(timezone.utc)) + timedelta(days=20)).date()
+    d2 = (to_local(datetime.now(timezone.utc)) + timedelta(days=22)).date()
+    db.close()
+    bid = client.post("/api/bookings/quick", headers=auth,
+                      json={"tour_id": tid, "qty": 1, "passengers": 2,
+                            "name": "Mover", "phone": "+385912220001",
+                            "start": f"{d1}T18:00:00"}).json()["booking_ids"][0]
+    db = SessionLocal()
+    before = db.get(Booking, bid)
+    dur = before.end_datetime - before.start_datetime
+    db.close()
+    r = client.post(f"/api/bookings/{bid}/move", headers=auth,
+                    json={"start": f"{d2}T10:00:00"})
+    assert r.status_code == 200, r.text
+    assert "10:00" in r.json()["when"]
+    db = SessionLocal()
+    after = db.get(Booking, bid)
+    assert after.end_datetime - after.start_datetime == dur   # duration kept
+    db.close()
+    # fill every unit at another slot, then try to move into it
+    client.post("/api/bookings/quick", headers=auth,
+                json={"tour_id": tid, "qty": 6, "passengers": 2,
+                      "name": "Blocker", "phone": "+385912220002",
+                      "start": f"{d2}T14:00:00"})
+    clash = client.post(f"/api/bookings/{bid}/move", headers=auth,
+                        json={"start": f"{d2}T14:00:00"})
+    assert clash.status_code == 409
+    # forcing it through is possible when the operator insists
+    forced = client.post(f"/api/bookings/{bid}/move", headers=auth,
+                         json={"start": f"{d2}T14:00:00", "force": True})
+    assert forced.status_code == 200
+
+
+def test_api_key_security_and_isolation(client):
+    """The integration API: no key = no access, keys are scoped, and a key only
+    ever sees its own business."""
+    from app.core.database import SessionLocal
+    from app.core.tenancy import all_tenants, as_tenant
+    from app.models.tenant import Tenant
+    from app.models.asset import Asset
+    from app.models.tour_type import TourType
+    from app.services import api_key_service
+    from app.core.timeutil import to_local
+    from datetime import datetime, timezone, timedelta
+    db = SessionLocal()
+    with all_tenants(db):
+        if not db.query(Tenant).filter(Tenant.id == 77).first():
+            db.add(Tenant(id=77, name="API Other", slug="apiother"))
+            db.commit()
+    with as_tenant(77, db):
+        if not db.query(Asset).filter(Asset.name == "OTHER BOAT").first():
+            db.add(Asset(name="OTHER BOAT", asset_type="boat", capacity=8,
+                         active=True, tenant_id=77))
+            db.commit()
+    with as_tenant(1, db):
+        _, raw_read = api_key_service.issue(db, name="Read key", scopes="read")
+        _, raw_write = api_key_service.issue(db, name="Write key",
+                                             scopes="read,write")
+        t = db.query(TourType).filter(TourType.asset_type == "jetski").first()
+        tid = t.id
+    day = (to_local(datetime.now(timezone.utc)) + timedelta(days=25)).date()
+    db.close()
+
+    # no key / bad key
+    assert client.get("/api/v1/tours").status_code == 401
+    assert client.get("/api/v1/tours",
+                      headers={"X-API-Key": "rok_nonsense"}).status_code == 401
+    rd = {"X-API-Key": raw_read}
+    wr = {"X-API-Key": raw_write}
+    # ping identifies the business
+    p = client.get("/api/v1/ping", headers=rd).json()
+    assert p["business_id"] == 1 and p["scopes"] == ["read"]
+    # isolation: the other tenant's boat is invisible
+    fleet = client.get("/api/v1/fleet", headers=rd).json()["assets"]
+    assert not any(a["name"] == "OTHER BOAT" for a in fleet)
+    assert len(fleet) > 1
+    # read key cannot write
+    body = {"tour_id": tid, "qty": 1, "passengers": 2, "name": "API Guest",
+            "phone": "+385913330001", "start": f"{day}T10:00:00"}
+    assert client.post("/api/v1/bookings", headers=rd, json=body).status_code == 403
+    # write key can
+    w = client.post("/api/v1/bookings", headers=wr, json=body)
+    assert w.status_code == 200, w.text
+    assert w.json()["count"] == 1
+    # and the booking shows up through the API
+    lst = client.get("/api/v1/bookings?days_ahead=60", headers=rd).json()
+    assert any(b["guest"]["name"] == "API Guest" for b in lst["bookings"])
+    # revoked keys stop working
+    db = SessionLocal()
+    with as_tenant(1, db):
+        from app.models.api_key import ApiKey
+        k = db.query(ApiKey).filter(ApiKey.name == "Read key").first()
+        api_key_service.revoke(db, k.id)
+    db.close()
+    assert client.get("/api/v1/tours", headers=rd).status_code == 401
+
+
+def test_api_key_admin_endpoints(client, auth):
+    """Issuing shows the raw key once; listing never exposes it again."""
+    r = client.post("/api/keys", headers=auth,
+                    json={"name": "Jarvis test", "scopes": ["read", "write"]})
+    assert r.status_code == 200
+    body = r.json()
+    raw = body["key"]
+    assert raw.startswith("rok_")
+    assert "write" in body["scopes"]
+    # the list shows a masked prefix, never the full key
+    lst = client.get("/api/keys", headers=auth).json()["keys"]
+    row = next(k for k in lst if k["name"] == "Jarvis test")
+    assert raw not in str(lst)
+    assert row["prefix"] and len(row["prefix"]) < len(raw)
+    # the issued key actually works
+    assert client.get("/api/v1/ping",
+                      headers={"X-API-Key": raw}).status_code == 200
+    # a too-short name is refused
+    assert client.post("/api/keys", headers=auth,
+                       json={"name": "ab"}).status_code == 400
+    # revoking stops it immediately
+    assert client.delete(f"/api/keys/{row['id']}", headers=auth).status_code == 200
+    assert client.get("/api/v1/ping",
+                      headers={"X-API-Key": raw}).status_code == 401

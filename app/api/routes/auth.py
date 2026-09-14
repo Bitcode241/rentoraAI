@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     # login happens before we know the tenant, so look up across all of them
     from app.core.tenancy import all_tenants, set_tenant
-    with all_tenants():
+    with all_tenants(db):
         user = db.query(User).filter(User.username == form.username).first()
     if not user or not verify_password(form.password, user.hashed_password):
         raise HTTPException(401, "Incorrect username or password")

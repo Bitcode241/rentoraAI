@@ -49,11 +49,11 @@ def list_blocks(upcoming: bool = True, db: Session = Depends(get_db),
 def create_block(payload: dict, db: Session = Depends(get_db),
                  _=Depends(get_current_user)):
     """Block a unit, or the whole fleet of a type, for a period."""
-    from app.ai.tools import _parse
+    from app.core.timeutil import parse_local_input
     from app.services import audit
     try:
-        start = _parse(str(payload.get("start") or ""))
-        end = _parse(str(payload.get("end") or ""))
+        start = parse_local_input(str(payload.get("start") or ""))
+        end = parse_local_input(str(payload.get("end") or ""))
     except Exception:
         raise HTTPException(400, "Neispravan datum/vrijeme.")
     asset_id = payload.get("asset_id") or None

@@ -12,6 +12,7 @@ from app.models.booking import Booking
 from app.models.asset import Asset
 from app.models.customer import Customer
 from app.core.logging import get_logger
+from app.core.timeutil import fmt_local
 
 log = get_logger("reminders")
 
@@ -67,7 +68,9 @@ def send_reminders(db: Session, manager=None, business_name="Rentora") -> dict:
     for b in bookings:
         asset = db.get(Asset, b.asset_id)
         cust = db.get(Customer, b.customer_id)
-        when = b.start_datetime.strftime("%d.%m.%Y %H:%M")
+        # bookings are stored in UTC — the reminder must show local time or the
+        # owner reads the wrong hour
+        when = fmt_local(b.start_datetime)
         aname = asset.name if asset else "—"
         pax = f" — {b.passengers} osoba" if getattr(b, "passengers", 0) else ""
         details = (f"• {when} — {aname}{pax}"

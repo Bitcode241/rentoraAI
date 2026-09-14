@@ -38,32 +38,56 @@ class TenantMixin:
         Integer, default=DEFAULT_TENANT_ID, index=True, nullable=False)
 
 
-def set_tenant(tenant_id):
+def set_tenant(tenant_id, db=None):
+    """Scope subsequent queries to a tenant.
+
+    The id is stored on the Session when one is given, because FastAPI may run a
+    dependency and its endpoint in different threads — a ContextVar set in the
+    dependency would not be visible to the query. The context variable is kept as
+    a fallback for background jobs and scripts that share no session.
+    """
     current_tenant_id.set(tenant_id)
+    if db is not None:
+        db.info["tenant_id"] = tenant_id
 
 
-def get_tenant():
+def get_tenant(db=None):
+    if db is not None and "tenant_id" in db.info:
+        return db.info["tenant_id"]
     return current_tenant_id.get()
 
 
 @contextmanager
-def all_tenants():
+def all_tenants(db=None):
     """Temporarily disable filtering (platform-level work only)."""
     token = _bypass.set(True)
+    had = db is not None and db.info.get("_bypass")
+    if db is not None:
+        db.info["_bypass"] = True
     try:
         yield
     finally:
         _bypass.reset(token)
+        if db is not None and not had:
+            db.info.pop("_bypass", None)
 
 
 @contextmanager
-def as_tenant(tenant_id):
+def as_tenant(tenant_id, db=None):
     """Run a block as a specific tenant (background jobs, scripts)."""
     token = current_tenant_id.set(tenant_id)
+    prev = db.info.get("tenant_id") if db is not None else None
+    if db is not None:
+        db.info["tenant_id"] = tenant_id
     try:
         yield
     finally:
         current_tenant_id.reset(token)
+        if db is not None:
+            if prev is None:
+                db.info.pop("tenant_id", None)
+            else:
+                db.info["tenant_id"] = prev
 
 
 def install(session_factory):
@@ -73,9 +97,16 @@ def install(session_factory):
     def _add_tenant_filter(state):
         if not state.is_select or state.is_column_load or state.is_relationship_load:
             return
-        if _bypass.get():
+        sess = state.session
+        if _bypass.get() or (sess is not None and sess.info.get("_bypass")):
             return
-        tid = current_tenant_id.get()
+        # the session carries the tenant for web requests; the context var covers
+        # background jobs that never touch a request
+        tid = None
+        if sess is not None:
+            tid = sess.info.get("tenant_id")
+        if tid is None:
+            tid = current_tenant_id.get()
         if tid is None:
             return          # platform context: no filtering
         state.statement = state.statement.options(
