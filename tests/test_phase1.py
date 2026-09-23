@@ -3331,3 +3331,42 @@ def test_api_key_admin_endpoints(client, auth):
     assert client.delete(f"/api/keys/{row['id']}", headers=auth).status_code == 200
     assert client.get("/api/v1/ping",
                       headers={"X-API-Key": raw}).status_code == 401
+
+
+def test_partner_running_account(client, auth):
+    """A partner's balance offsets old debts against new earnings automatically."""
+    p = client.post("/api/partners", headers=auth,
+                    json={"name": "Blue Cave Marko", "phone": "+385911111111"})
+    assert p.status_code == 200
+    pid = p.json()["id"]
+    # an old debt: I owe them 200
+    r = client.post(f"/api/partners/{pid}/entry", headers=auth,
+                    json={"kind": "owed", "amount": 200, "note": "stari dug"})
+    assert r.json()["balance"] == -200
+    # send 2 guests: they pay 110, partner keeps 80, my 30 stays with the partner
+    r2 = client.post(f"/api/partners/{pid}/referral", headers=auth,
+                     json={"tour_name": "Blue Cave", "guests": 2,
+                           "guest_paid": 110, "partner_gets": 80})
+    assert r2.json()["my_earning"] == 30
+    assert r2.json()["balance"] == -170          # debt shrinks
+    # more guests
+    client.post(f"/api/partners/{pid}/referral", headers=auth,
+                json={"tour_name": "Blue Cave", "guests": 4,
+                      "guest_paid": 220, "partner_gets": 160})
+    st = client.get(f"/api/partners/{pid}", headers=auth).json()
+    assert st["balance"] == -110
+    assert st["guests_sent"] == 6
+    assert st["earned_total"] == 90
+    assert st["passed_to_partner"] == 240
+    # a payment I make reduces my debt
+    r3 = client.post(f"/api/partners/{pid}/entry", headers=auth,
+                     json={"kind": "payment_out", "amount": 110,
+                           "note": "isplata"})
+    assert r3.json()["balance"] == 0
+    # nonsense is refused
+    assert client.post(f"/api/partners/{pid}/referral", headers=auth,
+                       json={"guest_paid": 50, "partner_gets": 80,
+                             "guests": 1}).status_code == 400
+    # the overview separates the two directions
+    ov = client.get("/api/partners", headers=auth).json()
+    assert "owed_to_me" in ov and "owed_by_me" in ov

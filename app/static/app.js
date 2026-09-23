@@ -5,7 +5,7 @@ let DASH = null;
 // then the money, then the things you set up once, then the system.
 const NAV_GROUPS = [
   {label:'', items:['Danas','Slobodno','Kalendar','Rezervacije','Blokade']},
-  {label:'Novac', items:['Novac','Partneri','Izvori']},
+  {label:'Novac', items:['Novac','Suradnici','Partneri','Izvori']},
   {label:'Ponuda', items:['Ture','Flota','Transferi','Dodaci','Widget']},
   {label:'Gosti', items:['Gosti','Poruke']},
   {label:'Sustav', items:['Postavke','Osoblje','API ključevi','Uvjeti','Uvjeti platforme','Provjera','Email računi','Log']},
@@ -13,7 +13,7 @@ const NAV_GROUPS = [
 const PAGES = NAV_GROUPS.flatMap(g=>g.items);
 // which permission each page needs — the server enforces this too
 const PAGE_PERM = {
-  'Novac':'money','Partneri':'money','Izvori':'money',
+  'Novac':'money','Partneri':'money','Suradnici':'money','Izvori':'money',
   'Postavke':'settings','Uvjeti':'settings','Email računi':'settings',
   'Uvjeti platforme':'platform','API ključevi':'platform','Provjera':'settings','Log':'settings',
   'Ture':'settings','Flota':'settings','Transferi':'settings','Dodaci':'settings',
@@ -31,6 +31,7 @@ const SUBS = {
   'Kalendar':'Raspored po plovilima',
   'Rezervacije':'Sve rezervacije, svi kanali',
   'Novac':'Koliko je ušlo i koliko ti stvarno ostaje',
+  'Suradnici':'Tekući račun — tko kome duguje',
   'Partneri':'Koliko duguješ vlasnicima plovila',
   'Izvori':'Odakle dolaze gosti (Google Ads, WhatsApp...)',
   'Ture':'Katalog tura — jedna tura, jedan ID',
@@ -552,6 +553,41 @@ const RENDER = {
             </div>`).join('')}
         </div>`;
       }).join('')}`;
+  },
+  'Suradnici': async (v)=>{
+    const pid=window.__pSel||0;
+    if(pid){ return renderPartnerStatement(v, pid); }
+    const d=await api('/api/partners');
+    window.__pKinds=d.kinds;
+    v.innerHTML=`
+      <p style="color:var(--mut);font-size:13px;margin-top:0">Tekući račun s ljudima kojima šalješ goste.
+      Tvoja zarada ostaje kod njih i prebija se sa starim dugovima — saldo pokazuje tko kome duguje.</p>
+      <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+        <div class="panel" style="flex:1;min-width:150px;padding:14px">
+          <div style="font-size:11px;color:var(--mut);text-transform:uppercase">Meni duguju</div>
+          <div style="font-size:22px;font-weight:800;color:var(--good)">${money(d.owed_to_me)}</div></div>
+        <div class="panel" style="flex:1;min-width:150px;padding:14px">
+          <div style="font-size:11px;color:var(--mut);text-transform:uppercase">Ja dugujem</div>
+          <div style="font-size:22px;font-weight:800;color:#b06f00">${money(d.owed_by_me)}</div></div>
+      </div>
+      <div class="toolbar" style="margin-bottom:14px">
+        <button class="btn btn-sm" onclick="newPartnerModal()">+ Novi suradnik</button>
+      </div>
+      ${!d.partners.length?'<div class="panel"><div class="empty">Nema suradnika. Dodaj prvog.</div></div>':
+      `<div class="bk-list">${d.partners.map(p=>`
+        <article class="bk" onclick="window.__pSel=${p.id};go('Suradnici')">
+          <header class="bk-top">
+            <div class="bk-who">
+              <div class="bk-name">${p.name}</div>
+              <div class="bk-sub">${p.guests_sent} gostiju u ${p.referrals} tura${p.phone?' · '+p.phone:''}</div>
+            </div>
+            <div class="bk-when">
+              <div class="bk-date" style="color:${p.balance>0?'var(--good)':(p.balance<0?'#b06f00':'var(--mut)')}">
+                ${p.balance===0?'0 €':money(Math.abs(p.balance))}</div>
+              <div class="bk-time">${p.balance>0?'duguje meni':(p.balance<0?'dugujem ja':'podmireno')}</div>
+            </div>
+          </header>
+        </article>`).join('')}</div>`}`;
   },
   'Partneri': async (v)=>{
     const d=await api('/api/dashboard/partners?days=90');
@@ -1962,6 +1998,168 @@ async function saveBlock(){
 async function delBlock(id){
   if(!confirm('Ukloniti blokadu? Termin postaje ponovno dostupan.')) return;
   try{ await api('/api/blocks/'+id,{method:'DELETE'}); go('Blokade'); }
+  catch(e){ alert(e.message||'Greška'); }
+}
+
+async function renderPartnerStatement(v, pid){
+  const d=await api('/api/partners/'+pid);
+  window.__pKinds=d.kinds;
+  const b=d.balance;
+  v.innerHTML=`
+    <div class="toolbar" style="margin-bottom:14px">
+      <button class="btn btn-sm btn-ghost" onclick="window.__pSel=0;go('Suradnici')">‹ Svi suradnici</button>
+    </div>
+    <div class="panel" style="padding:16px;margin-bottom:14px;max-width:460px;
+      border-left:4px solid ${b>0?'var(--good)':(b<0?'#b06f00':'var(--line)')}">
+      <div style="font-size:17px;font-weight:800">${d.partner.name}</div>
+      <div style="font-size:12px;color:var(--mut);margin-bottom:8px">
+        ${d.partner.phone||''}${d.partner.contact?' · '+d.partner.contact:''}</div>
+      <div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px">
+        ${b>0?'Duguje meni':(b<0?'Dugujem mu':'Podmireno')}</div>
+      <div style="font-size:30px;font-weight:800;color:${b>0?'var(--good)':(b<0?'#b06f00':'var(--mut)')}">
+        ${b===0?'✓':money(Math.abs(b))}</div>
+      <div style="font-size:12px;color:var(--mut);margin-top:6px">
+        Poslao ${d.guests_sent} gostiju · moja zarada ${money(d.earned_total)} ·
+        njemu proslijeđeno ${money(d.passed_to_partner)}</div>
+    </div>
+    <div class="toolbar" style="margin-bottom:14px">
+      <button class="btn btn-sm" onclick="referralModal(${pid})">+ Poslao gosta</button>
+      <button class="btn btn-sm btn-ghost" onclick="entryModal(${pid})">+ Uplata / dug</button>
+    </div>
+    <div class="panel" style="padding:0">
+      ${!d.entries.length?'<div class="empty" style="padding:20px">Nema stavki.</div>':
+      `<table style="width:100%;font-size:13px">
+        <thead><tr style="text-align:left;color:var(--mut);font-size:11px;background:var(--bg)">
+          <th style="padding:10px 12px">Datum</th><th>Što</th><th>Iznos</th><th>Saldo</th><th></th></tr></thead>
+        <tbody>${d.entries.map(e=>`<tr style="border-top:1px solid var(--line)">
+          <td data-l="Datum" style="padding:9px 12px;white-space:nowrap">${fmtDay(e.date)}</td>
+          <td data-l="Što">${e.kind==='referral'
+            ? `<b>${e.tour_name||'Tura'}</b> — ${e.guests} gost(iju)<br>
+               <span style="font-size:11.5px;color:var(--mut)">gost platio ${money(e.guest_paid)}, njemu ${money(e.partner_gets)}</span>`
+            : `${e.kind_label}${e.note?'<br><span style="font-size:11.5px;color:var(--mut)">'+e.note+'</span>':''}`}</td>
+          <td data-l="Iznos" style="white-space:nowrap;color:${e.amount>0?'var(--good)':'#b06f00'}">
+            <b>${e.amount>0?'+':''}${money(e.amount)}</b></td>
+          <td data-l="Saldo" style="white-space:nowrap;color:var(--mut)">${money(e.running)}</td>
+          <td><button class="ic" title="Obriši" onclick="delEntry(${e.id})"
+            style="width:28px;height:28px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--mut)">✕</button></td>
+        </tr>`).join('')}</tbody></table>`}
+    </div>
+    <p style="font-size:12px;color:var(--mut);margin-top:12px">
+      Zeleno = raste ono što partner duguje tebi. Narančasto = raste tvoj dug prema njemu.</p>`;
+}
+
+function newPartnerModal(){
+  openModal(`
+    <h3 style="margin-top:0">Novi suradnik</h3>
+    <label>Naziv</label><input id="pn_name" placeholder="npr. Blue Cave — Marko">
+    <label>Telefon</label><input id="pn_phone" placeholder="+385 91 234 5678">
+    <label>Kontakt osoba (nije obavezno)</label><input id="pn_contact">
+    <label>Bilješka</label><input id="pn_note" placeholder="npr. Blue Cave i Elafiti, plaća petkom">
+    <div id="pn_msg" style="font-size:13px;margin-top:8px"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn" onclick="savePartner()">Spremi</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Odustani</button>
+    </div>`);
+}
+
+async function savePartner(){
+  const m=document.getElementById('pn_msg');
+  try{
+    await api('/api/partners',{method:'POST',body:JSON.stringify({
+      name:val('pn_name'), phone:val('pn_phone'),
+      contact:val('pn_contact'), note:val('pn_note')})});
+    closeModal(); window.__pSel=0; go('Suradnici');
+  }catch(e){ if(m){ m.style.color='var(--bad)'; m.textContent=e.message||'Greška'; } }
+}
+
+function referralModal(pid){
+  openModal(`
+    <h3 style="margin-top:0">Poslao gosta</h3>
+    <p style="color:var(--mut);font-size:13px;margin-top:0">Koliko je gost platio ukupno i koliko od toga ide suradniku. Razlika je tvoja zarada i ostaje kod njega.</p>
+    <label>Tura</label><input id="rf_tour" placeholder="npr. Blue Cave" value="Blue Cave">
+    <div style="display:flex;gap:10px">
+      <div style="flex:1"><label>Broj gostiju</label>
+        <input id="rf_guests" type="number" min="1" value="2" oninput="rfCalc()"></div>
+      <div style="flex:1"><label>Cijena po osobi (€)</label>
+        <input id="rf_pp" type="number" min="0" step="1" value="55" oninput="rfCalc()"></div>
+    </div>
+    <div style="display:flex;gap:10px">
+      <div style="flex:1"><label>Gost platio ukupno (€)</label>
+        <input id="rf_paid" type="number" min="0" step="1" value="110" oninput="rfCalc(true)"></div>
+      <div style="flex:1"><label>Suradniku ide (€)</label>
+        <input id="rf_gets" type="number" min="0" step="1" value="80" oninput="rfCalc(true)"></div>
+    </div>
+    <div id="rf_calc" style="background:var(--sand);border-radius:8px;padding:10px 12px;margin-top:10px;font-size:13px"></div>
+    <label>Bilješka</label><input id="rf_note" placeholder="npr. Ana Horvat, 20.9.">
+    <div id="rf_msg" style="font-size:13px;margin-top:8px"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn" onclick="saveReferral(${pid})">Spremi</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Odustani</button>
+    </div>`);
+  rfCalc();
+}
+
+function rfCalc(manual){
+  const g=+val('rf_guests')||0, pp=+val('rf_pp')||0;
+  if(!manual && g && pp){ document.getElementById('rf_paid').value = g*pp; }
+  const paid=+val('rf_paid')||0, gets=+val('rf_gets')||0;
+  const mine=Math.round((paid-gets)*100)/100;
+  const box=document.getElementById('rf_calc');
+  if(box) box.innerHTML=`
+    <div style="display:flex;justify-content:space-between"><span style="color:var(--mut)">Gost platio</span><b>${money(paid)}</b></div>
+    <div style="display:flex;justify-content:space-between"><span style="color:var(--mut)">Suradniku</span><b>${money(gets)}</b></div>
+    <div style="display:flex;justify-content:space-between;margin-top:4px;padding-top:6px;border-top:1px solid var(--line)">
+      <span style="color:var(--mut)">Moja zarada (ostaje kod njega)</span>
+      <b style="color:${mine<0?'var(--bad)':'var(--good)'};font-size:15px">${money(mine)}</b></div>`;
+}
+
+async function saveReferral(pid){
+  const m=document.getElementById('rf_msg');
+  try{
+    const r=await api('/api/partners/'+pid+'/referral',{method:'POST',body:JSON.stringify({
+      tour_name:val('rf_tour'), guests:+val('rf_guests')||0,
+      guest_paid:+val('rf_paid')||0, partner_gets:+val('rf_gets')||0,
+      note:val('rf_note')})});
+    closeModal(); go('Suradnici');
+  }catch(e){ if(m){ m.style.color='var(--bad)'; m.textContent=e.message||'Greška'; } }
+}
+
+function entryModal(pid){
+  const kinds=window.__pKinds||{};
+  openModal(`
+    <h3 style="margin-top:0">Uplata ili dug</h3>
+    <label>Što bilježiš</label>
+    <select id="en_kind">
+      <option value="payment_out">Platio sam suradniku</option>
+      <option value="payment_in">Suradnik mi je platio</option>
+      <option value="owed">Dugujem mu (njegov gost, stari dug)</option>
+      <option value="adjust">Ispravak u moju korist</option>
+    </select>
+    <label>Iznos (€)</label>
+    <input id="en_amt" type="number" min="0" step="1" placeholder="npr. 200">
+    <label>Bilješka</label>
+    <input id="en_note" placeholder="npr. stari dug iz srpnja">
+    <div style="font-size:12px;color:var(--mut);margin-top:8px">
+      Upiši pozitivan broj — smjer se određuje po vrsti stavke.</div>
+    <div id="en_msg" style="font-size:13px;margin-top:8px"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn" onclick="saveEntry(${pid})">Spremi</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Odustani</button>
+    </div>`);
+}
+
+async function saveEntry(pid){
+  const m=document.getElementById('en_msg');
+  try{
+    await api('/api/partners/'+pid+'/entry',{method:'POST',body:JSON.stringify({
+      kind:val('en_kind'), amount:+val('en_amt')||0, note:val('en_note')})});
+    closeModal(); go('Suradnici');
+  }catch(e){ if(m){ m.style.color='var(--bad)'; m.textContent=e.message||'Greška'; } }
+}
+
+async function delEntry(id){
+  if(!confirm('Obrisati ovu stavku? Saldo će se preračunati.')) return;
+  try{ await api('/api/partners/entry/'+id,{method:'DELETE'}); go('Suradnici'); }
   catch(e){ alert(e.message||'Greška'); }
 }
 
